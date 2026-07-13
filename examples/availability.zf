@@ -1,0 +1,19 @@
+# The scheduling engine, complete: availability as RULES instead of
+# hand-written blocks. A rule is unbounded — every weekday, forever —
+# so it must be bounded before it becomes concrete time: here `next 5
+# of` takes the coming working week. Rules keep the lens they were
+# written under: these are Vienna hours wherever the viewer is.
+
+timezone = Europe/Vienna
+
+hours = every weekday 09:00 .. 17:00
+lunch = every day 12:00 .. 13:00
+
+booked = 2026-07-13 10:00 .. 2026-07-13 11:30,
+         2026-07-14 15:00 .. 2026-07-14 16:00
+
+week = next 5 of hours                 # the next five working days
+free = week - lunch - booked           # rules subtract like anything else
+
+partition week, booked                 # the calendar picture
+slots of free every 30 minutes         # the booking page

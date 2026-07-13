@@ -1,0 +1,14 @@
+# The Schengen 90/180 rule: at most 90 days inside the zone in ANY
+# trailing 180-day window. That's a windowed aggregation — this file
+# replaces an 86-line hand-rolled Python script.
+
+timezone = Europe/Vienna
+
+trips = 2025-12-15 .. 2025-12-23,
+        2026-03-27 .. 2026-05-11,
+        2026-07-03 .. 2026-07-08,
+        2026-07-17 .. 2026-08-10
+
+days of trips & last 180 days          # used as of today
+
+rolling days of trips in 180 days limit 90

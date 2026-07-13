@@ -1,0 +1,15 @@
+# Same booking engine as booking.zf, but the facts now live OUTSIDE the
+# program. A host — a Lambda, the playground's data panel, a test —
+# passes {blocks, booked} as JSON and re-runs this script per request.
+# Accepting a slot = the host appends one pair to "booked". Nothing here
+# changes.
+
+timezone = Europe/Vienna
+
+blocks = load "blocks"
+booked = load "booked"
+
+free = blocks - booked
+
+partition blocks, booked               # the calendar picture — 2× means booked
+slots of free every 30 minutes         # the booking page: pick one

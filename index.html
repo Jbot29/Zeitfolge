@@ -1,0 +1,676 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Zeitfolge — time you can read (v0.9)</title>
+<style>
+  /* Same family as Schauplatz/Klangbild: paper, ink, mono. Zeitfolge's
+     accents: indigo (now / the timeline) and copper (the target).
+     Everything local — no CDN, no fonts to fetch; file:// works. */
+  :root {
+    --paper:#f6f3ea; --paper-deep:#ece7d8; --ink:#252a38; --ink-soft:rgba(37,42,56,0.55);
+    --ink-faint:rgba(37,42,56,0.14); --indigo:#3d4f9e; --copper:#b4551f; --moss:#4a7a52;
+    --mono:'IBM Plex Mono','SF Mono',ui-monospace,Menlo,monospace;
+    --serif:Georgia,'Times New Roman',serif;
+  }
+  * { box-sizing:border-box; margin:0; padding:0; }
+  html, body { height:100%; }
+  body {
+    background:var(--paper);
+    background-image:repeating-linear-gradient(90deg,transparent 0 59px,rgba(37,42,56,0.035) 59px 60px);
+    color:var(--ink); font-family:var(--mono);
+    padding:16px 18px 14px; display:flex; flex-direction:column; gap:10px; overflow:hidden;
+  }
+  header { display:flex; align-items:baseline; justify-content:space-between; gap:12px;
+    border-bottom:2px solid var(--ink); padding-bottom:8px; flex:none; }
+  h1 { font-family:var(--serif); font-weight:600; font-style:italic; font-size:21px; }
+  h1 .fig { font-family:var(--mono); font-style:normal; font-weight:500; font-size:11px;
+    letter-spacing:0.18em; color:var(--indigo); text-transform:uppercase; margin-right:10px; vertical-align:2px; }
+  header .sub { font-size:12px; color:var(--ink-soft); font-style:italic; font-family:var(--serif); }
+
+  .workspace { flex:1; display:grid; grid-template-columns:minmax(320px,5fr) minmax(380px,7fr); gap:14px; min-height:0; }
+  .col { display:flex; flex-direction:column; gap:8px; min-height:0; min-width:0; }
+  .panel-label { font-size:9px; letter-spacing:0.2em; text-transform:uppercase; color:var(--ink-soft);
+    display:flex; justify-content:space-between; align-items:baseline; flex:none; }
+  .panel-label .hint { letter-spacing:0; text-transform:none; font-style:italic; font-family:var(--serif); font-size:12px; }
+
+  #editor { flex:1; min-height:120px; width:100%; resize:none; background:#fbf9f1;
+    border:2px solid var(--ink); box-shadow:3px 3px 0 rgba(37,42,56,0.18); color:var(--ink);
+    font-family:var(--mono); font-size:13px; line-height:1.6; padding:12px 14px; tab-size:2; }
+  #editor:focus { outline:none; border-color:var(--indigo); }
+
+  /* the data panel — what a host would pass to evaluate(src, {data}) */
+  #datain { flex:none; height:96px; width:100%; resize:none; background:#fbf9f1;
+    border:2px solid var(--moss); color:var(--ink);
+    font-family:var(--mono); font-size:11px; line-height:1.5; padding:8px 10px; }
+  #datain:focus { outline:none; border-color:var(--indigo); }
+  #datain:placeholder-shown { border-style:dashed; }
+
+  /* the UTC view — the program with the lens removed */
+  #utcview { flex:none; max-height:28%; overflow:auto; background:var(--paper-deep);
+    border:2px dashed var(--indigo); font-size:11px; line-height:1.55; padding:10px 12px; white-space:pre; }
+
+  .controls { display:flex; gap:8px; align-items:center; flex:none; flex-wrap:wrap; }
+  button, select { font-family:var(--mono); font-size:12px; padding:7px 12px; cursor:pointer;
+    background:var(--ink); color:var(--paper); border:2px solid var(--ink); box-shadow:2px 2px 0 rgba(37,42,56,0.2); }
+  button.ghost, select { background:transparent; color:var(--ink); }
+  button:hover, select:hover { border-color:var(--indigo); color:var(--indigo); }
+  #status { font-size:11px; color:var(--ink-soft); margin-left:auto; text-align:right; }
+  #status.err { color:var(--copper); }
+
+  #cards { flex:1; overflow:auto; display:flex; flex-direction:column; gap:12px; min-height:0; }
+  .card { border:2px solid var(--ink); background:#fbf9f1; box-shadow:3px 3px 0 rgba(37,42,56,0.18);
+    padding:10px 14px 12px; flex:none; }
+  .card .cap { font-size:9px; letter-spacing:0.18em; text-transform:uppercase; color:var(--ink-soft);
+    display:flex; justify-content:space-between; gap:10px; flex-wrap:wrap; }
+  .card .cap b { color:var(--indigo); font-weight:500; text-transform:none; letter-spacing:0.04em; }
+  .card.passed .cap b { color:var(--copper); }
+  .card .when { font-size:11px; color:var(--ink-soft); margin-top:2px; }
+  .big { display:flex; gap:14px; align-items:baseline; margin:8px 0 4px; flex-wrap:wrap; }
+  .big .seg { display:flex; align-items:baseline; gap:4px; }
+  .big .n { font-size:34px; font-weight:500; letter-spacing:-0.02em; font-variant-numeric:tabular-nums; }
+  .big .u { font-size:10px; letter-spacing:0.14em; text-transform:uppercase; color:var(--ink-soft); }
+  .card.passed .big .n { color:var(--copper); }
+  .verdict { font-family:var(--serif); font-style:italic; font-size:13px; color:var(--ink-soft); margin-bottom:6px; }
+  canvas { width:100%; display:block; }
+  .segtable { font-size:11px; line-height:1.7; margin-top:6px; white-space:pre; overflow-x:auto; }
+  .segtable .cov { color:var(--indigo); }
+  .slotday { font-size:10px; letter-spacing:0.12em; text-transform:uppercase; color:var(--ink-soft); margin:8px 0 4px; }
+  .chips { display:flex; flex-wrap:wrap; gap:5px; }
+  .chip { border:1.5px solid var(--indigo); color:var(--indigo); padding:3px 8px; font-size:11px;
+    font-variant-numeric:tabular-nums; cursor:default; }
+  .chip:hover { background:var(--indigo); color:var(--paper); }
+  .more { font-family:var(--serif); font-style:italic; font-size:12px; color:var(--ink-soft); align-self:center; }
+  .empty { font-family:var(--serif); font-style:italic; color:var(--ink-soft); font-size:14px; padding:20px 4px; }
+</style>
+</head>
+<body>
+  <header>
+    <h1><span class="fig">Zeitfolge</span> time you can read</h1>
+    <div class="sub">v0.9 — the lens · intervals · the algebra · rolling · slots · load · recurrence · alone / shared · durations · provenance</div>
+  </header>
+
+  <div class="workspace">
+    <div class="col">
+      <div class="panel-label"><span>Source</span><span class="hint">UTC underneath · the lens is presentation</span></div>
+      <textarea id="editor" spellcheck="false"></textarea>
+      <div class="panel-label"><span>Data (JSON)</span><span class="hint">what a host passes to evaluate(src, {data}) — read with load "…"</span></div>
+      <textarea id="datain" spellcheck="false" placeholder='{ "blocks": [["2026-07-20 12:00", "2026-07-20 15:00"]] }'></textarea>
+      <div class="panel-label"><span>UTC view</span><span class="hint">the same program, lens removed — still valid source</span></div>
+      <pre id="utcview"></pre>
+      <div class="controls">
+        <select id="examples"></select>
+        <button id="open" class="ghost" title="load a .zf file from disk">open…</button>
+        <button id="reset" class="ghost" title="restore the current example">↺ reset</button>
+        <input type="file" id="openFile" accept=".zf,.txt,text/plain" hidden>
+        <span id="status">ready</span>
+      </div>
+    </div>
+    <div class="col">
+      <div class="panel-label"><span>Answers</span><span class="hint">live — every strip is a stretch of the one timeline</span></div>
+      <div id="cards"></div>
+    </div>
+  </div>
+
+<script src="zeitfolge.js"></script>
+<script>
+"use strict";
+const Z = window.Zeitfolge;
+
+/* ---- examples (embedded so file:// works; the .zf files are the
+        canonical copies and the test fixtures) ---- */
+const EXAMPLES = {
+  "schengen 90/180": `# The Schengen 90/180 rule: at most 90 days inside the zone in ANY
+# trailing 180-day window. That's a windowed aggregation — this file
+# replaces an 86-line hand-rolled Python script.
+
+timezone = Europe/Vienna
+
+trips = 2025-12-15 .. 2025-12-23,
+        2026-03-27 .. 2026-05-11,
+        2026-07-03 .. 2026-07-08,
+        2026-07-17 .. 2026-08-10
+
+days of trips & last 180 days          # used as of today
+
+rolling days of trips in 180 days limit 90
+`,
+  "booking slots": `# The scheduling core, self-contained (no external data yet): blocks of
+# availability and bookings are SEPARATE facts — policy vs events — and
+# free time is derived, never stored. When someone books, one interval
+# gets appended to \`booked\` and everything below recomputes.
+
+timezone = Europe/Vienna
+
+monday  = 2026-07-20 12:00 .. 2026-07-20 15:00
+tuesday = 2026-07-21 09:00 .. 2026-07-21 13:00
+blocks  = monday, tuesday
+
+booked = 2026-07-20 13:00 .. 2026-07-20 13:30,
+         2026-07-21 09:30 .. 2026-07-21 10:30
+
+free = blocks - booked                 # the temporal-db split, as algebra
+
+partition blocks, booked               # the calendar picture — 2× means booked
+slots of free every 30 minutes         # the booking page: pick one
+`,
+  "availability (recurrence)": `# The scheduling engine, complete: availability as RULES instead of
+# hand-written blocks. A rule is unbounded — every weekday, forever —
+# so it must be bounded before it becomes concrete time: here \`next 5
+# of\` takes the coming working week. Rules keep the lens they were
+# written under: these are Vienna hours wherever the viewer is.
+
+timezone = Europe/Vienna
+
+hours = every weekday 09:00 .. 17:00
+lunch = every day 12:00 .. 13:00
+
+booked = 2026-07-13 10:00 .. 2026-07-13 11:30,
+         2026-07-14 15:00 .. 2026-07-14 16:00
+
+week = next 5 of hours                 # the next five working days
+free = week - lunch - booked           # rules subtract like anything else
+
+partition week, booked                 # the calendar picture
+slots of free every 30 minutes         # the booking page
+`,
+  "booking via load": `# Same booking engine, but the facts now live OUTSIDE the program — in
+# the data panel below, standing in for what a host (a Lambda, a test)
+# would pass to evaluate(src, {data}). Accepting a slot = the host
+# appends one pair to "booked". Nothing here changes.
+
+timezone = Europe/Vienna
+
+blocks = load "blocks"
+booked = load "booked"
+
+free = blocks - booked
+
+partition blocks, booked               # the calendar picture — 2× means booked
+slots of free every 30 minutes         # the booking page: pick one
+`,
+  "credit blocks": `# The problem that started the whole language: overlapping blocks of
+# purchased credits, each with its own start and expiry. Which blocks
+# are live when? By hand you end up cutting the blocks into
+# non-overlapping pieces before you can count anything — so that
+# decomposition is a verb now.
+
+timezone = Europe/Vienna
+
+block1 = 2026-01-10 .. 2026-04-09      # 1000 credits — a 90-day block
+block2 = 2026-02-15 .. 2026-06-15      # bought mid-block, different expiry
+
+credits = block1, block2               # a collection — the names survive
+
+partition credits                      # the hand-built decomposition, automated
+
+overlap = block1 & block2
+days of overlap                        # how long both blocks are live at once
+days of credits                        # total coverage — the overlap counted once
+
+show alone in credits                  # the safe ground: exactly one block active
+show last 1 of alone in credits       # …and the LATEST such stretch — where to restart
+`,
+  "flight countdown": `# The countdown that started it all — now with the arithmetic it always
+# wanted. Note the two kinds of duration: hours are ABSOLUTE time,
+# days are CIVIL steps (same wall clock, calendar moved) — across a DST
+# night, flight - 24 hours and flight - 1 day are different instants.
+
+timezone = Europe/Vienna
+
+flight = 2026-07-17 10:40
+until flight
+
+go_to_airport = flight - 3 hours
+until go_to_airport
+
+in_amsterdam = flight + 3 hours + 30 minutes + 30 minutes
+until in_amsterdam
+`,
+  "two zones, one timeline": `# The lens re-aims mid-program: each half reads and shows civil time in
+# its own zone, but underneath everything is one UTC timeline — which is
+# how one program will eventually hold two people's calendars.
+
+timezone = Europe/Vienna
+standup = 2026-07-13 09:30
+until standup
+
+timezone = America/New_York
+demo = 2026-07-13 09:30      # same wall time, six hours later in absolute time
+until demo
+
+since 2026-01-01             # midnight New Year, New York
+`,
+};
+
+const EXAMPLE_DATA = {
+  "booking via load": JSON.stringify({
+    blocks: [["2026-07-20 12:00", "2026-07-20 15:00"], ["2026-07-21 09:00", "2026-07-21 13:00"]],
+    booked: [["2026-07-20 13:00", "2026-07-20 13:30"], ["2026-07-21 09:30", "2026-07-21 10:30"]],
+  }, null, 2),
+};
+
+const editor = document.getElementById("editor");
+const datain = document.getElementById("datain");
+const utcview = document.getElementById("utcview");
+const status = document.getElementById("status");
+const cards = document.getElementById("cards");
+const examplesSel = document.getElementById("examples");
+
+for (const name of Object.keys(EXAMPLES)) {
+  const o = document.createElement("option");
+  o.value = name; o.textContent = name;
+  examplesSel.appendChild(o);
+}
+examplesSel.onchange = () => {
+  editor.value = EXAMPLES[examplesSel.value];
+  datain.value = EXAMPLE_DATA[examplesSel.value] || "";
+  onEdit();
+};
+document.getElementById("reset").onclick = () => examplesSel.onchange();
+
+/* open… — a file picker, so it works from file:// and http alike */
+const openFile = document.getElementById("openFile");
+document.getElementById("open").onclick = () => openFile.click();
+openFile.onchange = () => {
+  const f = openFile.files[0];
+  if (!f) return;
+  f.text().then((t) => { editor.value = t; onEdit(); });
+  openFile.value = "";
+};
+
+editor.value = localStorage.getItem("zeitfolge.buffer") || EXAMPLES["schengen 90/180"];
+datain.value = localStorage.getItem("zeitfolge.data") || "";
+
+/* ?script=path & ?data=path — served over http, load .zf/.json from the
+   server; localStorage is untouched so embeds don't clobber the buffer */
+const params = new URLSearchParams(location.search);
+if (location.protocol.startsWith("http")) {
+  const grab = (key, into) => {
+    const p = params.get(key);
+    if (!p) return;
+    fetch(p).then((r) => r.text()).then((t) => { into.value = t; render(true); })
+      .catch(() => { status.textContent = `couldn't fetch ${p}`; status.classList.add("err"); });
+  };
+  grab("script", editor);
+  grab("data", datain);
+}
+
+/* ---- evaluate + render; the whole page is a function of
+        (source, data, now), so ticking is just re-running it ---- */
+function onEdit() {
+  localStorage.setItem("zeitfolge.buffer", editor.value);
+  localStorage.setItem("zeitfolge.data", datain.value);
+  render(true);
+}
+editor.addEventListener("input", onEdit);
+datain.addEventListener("input", onEdit);
+
+let cardSig = "";
+
+function render(rebuild) {
+  let data, dataErr = null;
+  if (datain.value.trim()) {
+    try { data = JSON.parse(datain.value); } catch (e) { dataErr = e.message; }
+  }
+  const out = Z.evaluate(editor.value, { data });
+
+  if (dataErr) {
+    status.textContent = `data isn't valid JSON: ${dataErr}`;
+    status.classList.add("err");
+  } else if (out.errors.length) {
+    const e = out.errors[0];
+    status.textContent = `line ${e.line}: ${e.msg}`;
+    status.classList.add("err");
+  } else {
+    const w = out.warnings[0];
+    status.textContent = w ? `line ${w.line}: ${w.msg}`
+      : `ok — ${Object.keys(out.bindings).length} value(s), ${out.queries.length} question(s)`;
+    status.classList.toggle("err", !!w);
+  }
+
+  utcview.textContent = Z.desugar(out);
+
+  const sig = out.queries.map((q) => q.kind + (q.members ? q.members.length : "")).join("|");
+  if (rebuild || sig !== cardSig) {
+    cardSig = sig;
+    cards.innerHTML = "";
+    if (!out.queries.length) {
+      const d = document.createElement("div");
+      d.className = "empty";
+      d.textContent = "No questions yet — ask with `until`, `since`, `days of`, `length of`, `partition`, `rolling days of`, or `slots of`.";
+      cards.appendChild(d);
+    }
+    for (const q of out.queries) cards.appendChild(buildCard(q));
+  }
+  out.queries.forEach((q, i) => updateCard(cards.children[i], q, out.now));
+}
+
+/* ---- cards ---- */
+
+function buildCard(q) {
+  const c = document.createElement("div");
+  c.className = "card";
+  if (q.kind === "until" || q.kind === "since") {
+    c.innerHTML = `<div class="cap"><span><b></b></span><span class="tz"></span></div>
+      <div class="when"></div><div class="big"></div><div class="verdict"></div><canvas height="56"></canvas>`;
+  } else if (q.kind === "partition") {
+    c.innerHTML = `<div class="cap"><span><b></b></span><span class="tz"></span></div>
+      <canvas></canvas><div class="segtable"></div>`;
+  } else if (q.kind === "rolling") {
+    c.innerHTML = `<div class="cap"><span><b></b></span><span class="tz"></span></div>
+      <canvas></canvas><div class="segtable"></div>`;
+  } else if (q.kind === "slots") {
+    c.innerHTML = `<div class="cap"><span><b></b></span><span class="tz"></span></div>
+      <canvas></canvas><div class="slotlist"></div>`;
+  } else if (q.kind === "show") {
+    c.innerHTML = `<div class="cap"><span><b></b></span><span class="tz"></span></div>
+      <canvas></canvas><div class="segtable"></div>`;
+  } else {   // days / length
+    c.innerHTML = `<div class="cap"><span><b></b></span><span class="tz"></span></div>
+      <div class="big"></div><canvas height="40"></canvas>`;
+  }
+  return c;
+}
+
+function updateCard(c, q, now) {
+  c.querySelector(".tz").textContent = q.zone;
+  if (q.kind === "until" || q.kind === "since") updateCountdown(c, q, now);
+  else if (q.kind === "partition") updatePartition(c, q);
+  else if (q.kind === "rolling") updateRolling(c, q, now);
+  else if (q.kind === "slots") updateSlots(c, q);
+  else if (q.kind === "show") updateShow(c, q);
+  else updateMeasure(c, q);
+}
+
+function updateShow(c, q) {
+  const n = q.members.length;
+  c.querySelector("b").textContent = `show ${q.expr} — ${n === 0 ? "none" : n === 1 ? "1 stretch" : n + " stretches"}`;
+  drawSet(c.querySelector("canvas"), q.members, null, q.zone);
+  const d = (ms) => Z.formatCivil(Z.epochToCivil(ms, q.zone)).replace(/ 00:00$/, "");
+  const rows = q.members.map((m) =>
+    `${d(m.start)} → ${d(m.end)}   ${String(Z.daysTouched([m], q.zone)).padStart(4)} days` +
+    (m.labels.length ? `   <span class="cov">${m.labels.join(" + ")}</span>` : ""));
+  c.querySelector(".segtable").innerHTML = rows.join("\n") || "none — no such stretch exists";
+}
+
+/* the booking page: slots as pick-list chips, grouped by civil day */
+const CHIP_CAP = 96;
+function updateSlots(c, q) {
+  c.querySelector("b").textContent = `slots of ${q.expr} every ${q.every} — ${q.slots.length} open`;
+  drawSlotStrip(c.querySelector("canvas"), q);
+
+  const dayName = new Intl.DateTimeFormat("en-US", { timeZone: q.zone, weekday: "short" });
+  const hm = (ms) => { const f = Z.epochToCivil(ms, q.zone); return `${String(f.h).padStart(2, "0")}:${String(f.mi).padStart(2, "0")}`; };
+  const byDay = new Map();
+  for (const s of q.slots.slice(0, CHIP_CAP)) {
+    const f = Z.epochToCivil(s.start, q.zone);
+    const key = `${dayName.format(s.start)} ${f.y}-${String(f.mo).padStart(2, "0")}-${String(f.d).padStart(2, "0")}`;
+    if (!byDay.has(key)) byDay.set(key, []);
+    byDay.get(key).push(`<span class="chip" title="${hm(s.start)}–${hm(s.end)}">${hm(s.start)}</span>`);
+  }
+  let html = "";
+  for (const [day, chips] of byDay)
+    html += `<div class="slotday">${day}</div><div class="chips">${chips.join("")}</div>`;
+  if (q.slots.length > CHIP_CAP)
+    html += `<div class="more">… and ${q.slots.length - CHIP_CAP} more</div>`;
+  if (!q.slots.length) html = `<div class="more">no open slots</div>`;
+  c.querySelector(".slotlist").innerHTML = html;
+}
+
+// the strip: free coverage in moss, slot cells cut into it
+function drawSlotStrip(canvas, q) {
+  const H = 46;
+  const { ctx, W } = setupCanvas(canvas, H);
+  const cov = Z.mergedCoverage(q.members);
+  if (!cov.length) return;
+  const pad = 10, a = cov[0].start, b = cov[cov.length - 1].end;
+  const x = (t) => pad + ((t - a) / Math.max(b - a, 1)) * (W - 2 * pad);
+  for (const cvg of cov) {                                    // the free stretches
+    ctx.fillStyle = "rgba(74,122,82,0.25)";
+    ctx.fillRect(x(cvg.start), 8, Math.max(2, x(cvg.end) - x(cvg.start)), 18);
+  }
+  for (const s of q.slots) {                                  // the offerable cells
+    ctx.fillStyle = "rgba(61,79,158,0.8)";
+    ctx.fillRect(x(s.start) + 0.75, 10, Math.max(1.5, x(s.end) - x(s.start) - 1.5), 14);
+  }
+  axis(ctx, W, H, a, b, x, q.zone);
+}
+
+function statusOf(v, limit) {
+  if (limit == null) return ["", ""];
+  if (v > limit) return ["OVER", "#b4551f"];
+  if (v >= limit * 0.9) return ["NEAR", "#b98a1d"];
+  return ["OK", "#4a7a52"];
+}
+
+function updateRolling(c, q, now) {
+  c.querySelector("b").textContent =
+    `rolling days of ${q.expr} in ${q.windowDays} days` + (q.limit != null ? ` limit ${q.limit}` : "");
+  drawRolling(c.querySelector("canvas"), q, now);
+
+  const d = (ms) => Z.formatCivil(Z.epochToCivil(ms, q.zone)).replace(/ 00:00$/, "");
+  const rows = q.perMember.map((p) => {
+    const [st, col] = statusOf(p.atEnd, q.limit);
+    const used = q.limit != null ? `${String(p.atEnd).padStart(3)}/${q.limit}` : String(p.atEnd).padStart(3);
+    return `${d(p.start)} → ${d(p.end - 1)}   ${String(p.days).padStart(3)} days   at end ${used}` +
+           (st ? `  <span style="color:${col};font-weight:500">${st}</span>` : "");
+  });
+  c.querySelector(".segtable").innerHTML = rows.join("\n");
+}
+
+/* the rolling chart: usage day by day, the limit as a copper line, each
+   member's high-water mark dotted at its last day, today marked live */
+function drawRolling(canvas, q, now) {
+  const H = 132;
+  const { ctx, W } = setupCanvas(canvas, H);
+  if (!q.series.length) return;
+  const L = 30, R = 10, T = 10, B = 16;
+  const a = q.series[0].ms, b = q.series[q.series.length - 1].ms;
+  const yMax = Math.max(q.max, q.limit || 0, 1) * 1.12;
+  const x = (t) => L + ((t - a) / Math.max(b - a, 1)) * (W - L - R);
+  const y = (v) => T + (1 - v / yMax) * (H - T - B);
+
+  // area + line, recolored copper wherever the limit is broken
+  ctx.beginPath();
+  ctx.moveTo(x(a), y(0));
+  for (const p of q.series) ctx.lineTo(x(p.ms), y(p.value));
+  ctx.lineTo(x(b), y(0)); ctx.closePath();
+  ctx.fillStyle = "rgba(61,79,158,0.13)"; ctx.fill();
+  ctx.lineWidth = 1.5;
+  for (let i = 1; i < q.series.length; i++) {
+    const p0 = q.series[i - 1], p1 = q.series[i];
+    ctx.strokeStyle = q.limit != null && (p0.value > q.limit || p1.value > q.limit) ? "#b4551f" : "#3d4f9e";
+    ctx.beginPath(); ctx.moveTo(x(p0.ms), y(p0.value)); ctx.lineTo(x(p1.ms), y(p1.value)); ctx.stroke();
+  }
+
+  ctx.strokeStyle = "rgba(37,42,56,0.35)"; ctx.lineWidth = 1;   // baseline
+  ctx.beginPath(); ctx.moveTo(L, y(0)); ctx.lineTo(W - R, y(0)); ctx.stroke();
+
+  ctx.font = "9px monospace"; ctx.fillStyle = "rgba(37,42,56,0.55)";
+  ctx.textAlign = "right"; ctx.fillText("0", L - 4, y(0) + 3);
+  ctx.fillText(String(q.max), L - 4, y(q.max) + 3);
+
+  if (q.limit != null) {                                        // the law, in copper
+    ctx.strokeStyle = "#b4551f"; ctx.setLineDash([5, 4]);
+    ctx.beginPath(); ctx.moveTo(L, y(q.limit)); ctx.lineTo(W - R, y(q.limit)); ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle = "#b4551f"; ctx.textAlign = "right"; ctx.fillText(String(q.limit), L - 4, y(q.limit) + 3);
+  }
+
+  for (const p of q.perMember) {                                // high-water marks
+    const px = x(Math.min(Math.max(p.end - 1, a), b));
+    ctx.fillStyle = "#b4551f";
+    ctx.beginPath(); ctx.arc(px, y(p.atEnd), 3, 0, 7); ctx.fill();
+    ctx.textAlign = "center"; ctx.fillText(String(p.atEnd), px, y(p.atEnd) - 6);
+  }
+
+  if (now >= a && now <= b) {                                   // today, live
+    const nearest = q.series.reduce((best, p) => Math.abs(p.ms - now) < Math.abs(best.ms - now) ? p : best);
+    ctx.strokeStyle = "rgba(61,79,158,0.6)"; ctx.setLineDash([2, 3]);
+    ctx.beginPath(); ctx.moveTo(x(now), T); ctx.lineTo(x(now), y(0)); ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle = "#3d4f9e";
+    ctx.beginPath(); ctx.arc(x(now), y(nearest.value), 4, 0, 7); ctx.fill();
+    ctx.textAlign = "left"; ctx.fillText(`today: ${nearest.value}`, Math.min(x(now) + 6, W - 60), y(nearest.value) - 6);
+  }
+
+  axis(ctx, W, H, a, b, x, q.zone);
+}
+
+function updateCountdown(c, q, now) {
+  c.classList.toggle("passed", q.passed);
+  c.querySelector("b").textContent = `${q.kind} ${q.label}`;
+  c.querySelector(".when").textContent = Z.formatInstant(q.targetMs, q.zone);
+
+  const bd = q.breakdown;
+  c.querySelector(".big").innerHTML = bigSegs([[bd.days, "days"], [bd.hours, "hours"], [bd.minutes, "min"], [bd.seconds, "sec"]]);
+  c.querySelector(".verdict").textContent = q.passed
+    ? (q.kind === "until" ? `passed ${Z.formatDuration(bd)} ago` : `hasn't happened yet — ${Z.formatDuration(bd)} from now`)
+    : "";
+  drawCountdown(c.querySelector("canvas"), q, now);
+}
+
+function updateMeasure(c, q) {
+  c.querySelector("b").textContent = `${q.kind} of ${q.expr}`;
+  const big = c.querySelector(".big");
+  if (q.kind === "days") {
+    big.innerHTML = `<span class="seg"><span class="n">${q.days}</span><span class="u">civil day${q.days === 1 ? "" : "s"}</span></span>`;
+  } else {
+    const bd = q.breakdown;
+    big.innerHTML = bigSegs([[bd.days, "days"], [bd.hours, "hours"], [bd.minutes, "min"], [bd.seconds, "sec"]]);
+  }
+  drawSet(c.querySelector("canvas"), q.members, null, q.zone);
+}
+
+function updatePartition(c, q) {
+  c.querySelector("b").textContent = `partition ${q.expr}`;
+  drawSet(c.querySelector("canvas"), q.members, q.segments, q.zone);
+
+  const rows = q.segments.map((s) => {
+    const d = (ms) => Z.formatCivil(Z.epochToCivil(ms, q.zone)).replace(/ 00:00$/, "");
+    return `${d(s.start)} → ${d(s.end)}   ${String(s.days).padStart(4)} days   <span class="cov">${s.covers.join(" + ")}</span>`;
+  });
+  c.querySelector(".segtable").innerHTML = rows.join("\n") || "nothing to partition";
+}
+
+function bigSegs(pairs) {
+  return pairs
+    .filter(([n], i, a) => n > 0 || a.slice(0, i).some(([m]) => m > 0) || i >= 2)
+    .map(([n, u]) => `<span class="seg"><span class="n">${n}</span><span class="u">${u}</span></span>`).join("");
+}
+
+/* ---- drawing ---- */
+const PALETTE = ["#3d4f9e", "#b4551f", "#4a7a52", "#b98a1d", "#7a3d6e", "#2f7f8a"];
+const labelText = (m) => m.labels.join("+");
+function colorFor(members) {
+  const keys = [...new Set(members.map(labelText))];
+  return (m) => PALETTE[Math.max(0, keys.indexOf(labelText(m))) % PALETTE.length];
+}
+
+function setupCanvas(canvas, H) {
+  const dpr = window.devicePixelRatio || 1;
+  const W = canvas.clientWidth || 600;
+  canvas.style.height = H + "px";
+  canvas.width = W * dpr; canvas.height = H * dpr;
+  const ctx = canvas.getContext("2d");
+  ctx.scale(dpr, dpr);
+  ctx.clearRect(0, 0, W, H);
+  return { ctx, W };
+}
+
+const TICKS = [
+  [Z.MS.minute, "minute"], [Z.MS.hour, "hour"], [6 * Z.MS.hour, "6h"],
+  [Z.MS.day, "day"], [7 * Z.MS.day, "week"], [30 * Z.MS.day, "~month"],
+];
+
+function axis(ctx, W, H, a, b, x, zone, unitLabel) {
+  ctx.fillStyle = "rgba(37,42,56,0.55)"; ctx.font = "9px monospace";
+  ctx.textAlign = "left";  ctx.fillText(Z.formatCivil(Z.epochToCivil(a, zone)), 10, H - 4);
+  ctx.textAlign = "right"; ctx.fillText(Z.formatCivil(Z.epochToCivil(b, zone)), W - 10, H - 4);
+  if (unitLabel) { ctx.textAlign = "center"; ctx.fillText(`ticks: 1 ${unitLabel}`, W / 2, H - 4); }
+}
+
+// countdown strip: the stretch between now and the target, calendar ticks
+function drawCountdown(canvas, q, now) {
+  const { ctx, W } = setupCanvas(canvas, 56);
+  const H = 56, mid = 30, pad = 10;
+  const a = Math.min(now, q.targetMs), b = Math.max(now, q.targetMs);
+  const span = Math.max(b - a, Z.MS.minute);
+  const x = (t) => pad + ((t - a) / span) * (W - 2 * pad);
+  const [step, unit] = TICKS.find(([s]) => span / s <= 90) || TICKS[TICKS.length - 1];
+
+  ctx.strokeStyle = "rgba(37,42,56,0.35)"; ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(pad, mid); ctx.lineTo(W - pad, mid); ctx.stroke();
+  ctx.strokeStyle = "rgba(61,79,158,0.5)";
+  for (let t = Math.ceil(a / step) * step; t <= b; t += step) {
+    ctx.beginPath(); ctx.moveTo(x(t), mid - 5); ctx.lineTo(x(t), mid + 5); ctx.stroke();
+  }
+  ctx.fillStyle = "#3d4f9e";   // now: an indigo dot
+  ctx.beginPath(); ctx.arc(x(now), mid, 4.5, 0, 7); ctx.fill();
+  ctx.strokeStyle = "#b4551f"; ctx.lineWidth = 2;   // target: a copper flag
+  ctx.beginPath(); ctx.moveTo(x(q.targetMs), mid + 6); ctx.lineTo(x(q.targetMs), mid - 12); ctx.stroke();
+  ctx.fillStyle = "#b4551f";
+  ctx.beginPath(); ctx.moveTo(x(q.targetMs), mid - 12); ctx.lineTo(x(q.targetMs) + 9, mid - 8.5);
+  ctx.lineTo(x(q.targetMs), mid - 5); ctx.fill();
+
+  ctx.fillStyle = "rgba(37,42,56,0.55)"; ctx.font = "9px monospace";
+  ctx.textAlign = "left";
+  ctx.fillText(now <= q.targetMs ? "now" : Z.formatCivil(Z.epochToCivil(a, q.zone)), pad, H - 4);
+  ctx.textAlign = "right";
+  ctx.fillText(now <= q.targetMs ? Z.formatCivil(Z.epochToCivil(b, q.zone)) : "now", W - pad, H - 4);
+  ctx.textAlign = "center"; ctx.fillText(`ticks: 1 ${unit}`, W / 2, H - 4);
+}
+
+/* the interval view: one row per member (stacked in source order, like
+   the ASCII art in notes.org), and — when partitioning — a band below
+   cut at every boundary, shaded by how many members cover each piece */
+function drawSet(canvas, members, segments, zone) {
+  const rowH = 16, pad = 10;
+  const bandH = segments ? 14 : 0;
+  const H = 6 + members.length * rowH + (segments ? bandH + 6 : 0) + 16;
+  const { ctx, W } = setupCanvas(canvas, H);
+  if (!members.length) return;
+
+  const a = Math.min(...members.map((m) => m.start));
+  const b = Math.max(...members.map((m) => m.end));
+  const span = Math.max(b - a, Z.MS.minute);
+  const x = (t) => pad + ((t - a) / span) * (W - 2 * pad);
+  const color = colorFor(members);
+
+  members.forEach((m, i) => {
+    const y = 6 + i * rowH;
+    ctx.fillStyle = color(m) + "cc";
+    ctx.fillRect(x(m.start), y, Math.max(2, x(m.end) - x(m.start)), rowH - 4);
+    ctx.fillStyle = "#fbf9f1"; ctx.font = "9px monospace"; ctx.textAlign = "left";
+    const label = labelText(m);
+    if (label && x(m.end) - x(m.start) > label.length * 6 + 6)
+      ctx.fillText(label, x(m.start) + 4, y + rowH - 9);
+  });
+
+  if (segments) {
+    const y = 6 + members.length * rowH + 4;
+    const maxCov = Math.max(...segments.map((s) => s.covers.length));
+    for (const s of segments) {
+      ctx.fillStyle = `rgba(37,42,56,${0.14 + 0.55 * (s.covers.length / maxCov)})`;
+      ctx.fillRect(x(s.start), y, Math.max(2, x(s.end) - x(s.start)), bandH - 4);
+      if (x(s.end) - x(s.start) > 22) {
+        ctx.fillStyle = "#fbf9f1"; ctx.font = "9px monospace"; ctx.textAlign = "center";
+        ctx.fillText(`${s.covers.length}×`, (x(s.start) + x(s.end)) / 2, y + bandH - 8);
+      }
+    }
+    ctx.strokeStyle = "rgba(37,42,56,0.3)"; ctx.lineWidth = 1;   // the cuts
+    for (const cut of new Set(segments.flatMap((s) => [s.start, s.end]))) {
+      ctx.beginPath(); ctx.moveTo(x(cut), 4); ctx.lineTo(x(cut), y + bandH - 2); ctx.stroke();
+    }
+  }
+  axis(ctx, W, H, a, b, x, zone);
+}
+
+render(true);
+setInterval(() => render(false), 1000);
+window.addEventListener("resize", () => render(true));
+</script>
+</body>
+</html>

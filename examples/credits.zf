@@ -1,0 +1,21 @@
+# The problem that started the whole language: overlapping blocks of
+# purchased credits, each with its own start and expiry. Which blocks
+# are live when? By hand you end up cutting the blocks into
+# non-overlapping pieces before you can count anything — so that
+# decomposition is a verb now.
+
+timezone = Europe/Vienna
+
+block1 = 2026-01-10 .. 2026-04-09      # 1000 credits — a 90-day block
+block2 = 2026-02-15 .. 2026-06-15      # bought mid-block, different expiry
+
+credits = block1, block2               # a collection — the names survive
+
+partition credits                      # the hand-built decomposition, automated
+
+overlap = block1 & block2
+days of overlap                        # how long both blocks are live at once
+days of credits                        # total coverage — the overlap counted once
+
+show alone in credits                  # the safe ground: exactly one block active
+show last 1 of alone in credits       # …and the LATEST such stretch — where to restart

@@ -1,0 +1,15 @@
+# The countdown that started it all — now with the arithmetic it always
+# wanted. Note the two kinds of duration: hours are ABSOLUTE time,
+# days are CIVIL steps (same wall clock, calendar moved) — across a DST
+# night, flight - 24 hours and flight - 1 day are different instants.
+
+timezone = Europe/Vienna
+
+flight = 2026-07-17 10:40
+until flight
+
+go_to_airport = flight - 3 hours
+until go_to_airport
+
+in_amsterdam = flight + 3 hours + 30 minutes + 30 minutes
+until in_amsterdam

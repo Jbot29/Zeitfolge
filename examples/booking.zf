@@ -1,0 +1,19 @@
+# The scheduling core, self-contained (no external data yet): blocks of
+# availability and bookings are SEPARATE facts — policy vs events — and
+# free time is derived, never stored. When someone books, one interval
+# gets appended to `booked` and everything below recomputes.
+
+timezone = Europe/Vienna
+
+monday  = 2026-07-20 12:00 .. 2026-07-20 15:00
+tuesday = 2026-07-21 09:00 .. 2026-07-21 13:00
+blocks  = monday, tuesday
+
+booked = 2026-07-20 13:00 .. 2026-07-20 13:30,
+         2026-07-21 09:30 .. 2026-07-21 10:30
+
+free = blocks - booked                 # the temporal-db split, as algebra
+
+partition blocks, booked               # the calendar picture — 2× means booked
+length of free
+slots of free every 30 minutes         # the booking page: pick one

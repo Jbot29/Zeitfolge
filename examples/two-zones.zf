@@ -1,0 +1,13 @@
+# The lens re-aims mid-program: each half reads and shows civil time in
+# its own zone, but underneath everything is one UTC timeline — which is
+# how one program will eventually hold two people's calendars.
+
+timezone = Europe/Vienna
+standup = 2026-07-13 09:30
+until standup
+
+timezone = America/New_York
+demo = 2026-07-13 09:30      # same wall time, six hours later in absolute time
+until demo
+
+since 2026-01-01             # midnight New Year, New York
