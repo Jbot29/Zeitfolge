@@ -228,6 +228,22 @@ until go_to_airport
 in_amsterdam = flight + 3 hours + 30 minutes + 30 minutes
 until in_amsterdam
 `,
+  "timezone helper": `# One meeting, three wall clocks — the remote worker's daily question.
+# The lens is presentation: re-aim it and ask again. Each answer shows
+# the SAME instant through a different zone, with a live countdown, and
+# the UTC view proves there is only one fact underneath. Move the
+# meeting once; every clock slides together.
+
+timezone = Europe/Vienna
+standup = 2026-07-14 17:00
+until standup                    # 17:00 in Vienna
+
+timezone = America/New_York
+until standup                    # 11:00 in New York
+
+timezone = Asia/Tokyo
+until standup                    # 00:00 in Tokyo — maybe move the meeting
+`,
   "two zones, one timeline": `# The lens re-aims mid-program: each half reads and shows civil time in
 # its own zone, but underneath everything is one UTC timeline — which is
 # how one program will eventually hold two people's calendars.
