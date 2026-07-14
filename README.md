@@ -69,3 +69,7 @@ until demo
 days of trips & last 180 days          # Schengen days used as of right now
 rolling days of trips in 180 days limit 90    # the whole usage curve, charted, with the law drawn on
 ```
+
+## License
+
+[MIT](LICENSE) © Jeremy Schwartz
