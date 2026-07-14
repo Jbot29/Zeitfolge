@@ -7,6 +7,8 @@ the box.
 
 See [LANGUAGE.md](LANGUAGE.md) for the spec and roadmap.
 
+![Time Screenshot\(./screenshot1.png)
+
 ## Running
 
 Open `index.html` in a browser — fully self-contained, no server, no
@@ -54,8 +56,15 @@ block2 = 2026-02-15 .. 2026-06-15      # bought mid-block, different expiry
 partition block1, block2               # → the non-overlapping pieces, drawn stacked:
                                        #   36 days block1 · 54 days both · 67 days block2
 
-trips = 2025-12-15 .. 2025-12-23,
-        2026-03-27 .. 2026-05-11
+//remote call
+timezone = Europe/Vienna
+standup = 2026-07-13 09:30
+until standup
+
+timezone = America/New_York
+demo = 2026-07-13 09:30      # same wall time, six hours later in absolute time
+until demo
+
 
 days of trips & last 180 days          # Schengen days used as of right now
 rolling days of trips in 180 days limit 90    # the whole usage curve, charted, with the law drawn on
