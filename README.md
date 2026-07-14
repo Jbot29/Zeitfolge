@@ -56,7 +56,7 @@ block2 = 2026-02-15 .. 2026-06-15      # bought mid-block, different expiry
 partition block1, block2               # → the non-overlapping pieces, drawn stacked:
                                        #   36 days block1 · 54 days both · 67 days block2
 
-//remote call
+#remote call
 timezone = Europe/Vienna
 standup = 2026-07-13 09:30
 until standup
