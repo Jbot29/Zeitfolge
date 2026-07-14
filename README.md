@@ -7,7 +7,7 @@ the box.
 
 See [LANGUAGE.md](LANGUAGE.md) for the spec and roadmap.
 
-![Time Screenshot\(./screenshot1.png)
+![Time Screenshot](./screenshot1.png)
 
 ## Running
 
