@@ -244,6 +244,24 @@ until standup                    # 11:00 in New York
 timezone = Asia/Tokyo
 until standup                    # 00:00 in Tokyo — maybe move the meeting
 `,
+  "world clock": `# The remote worker's wall: what time is it, right now, for everyone?
+# \`now\` is \`until\` with the target dropped — what's left is a clock,
+# read through whatever lens is in force. Stack the zones you live
+# across and the page IS a world clock; each ticks live. The UTC view
+# collapses them all to one \`now\` — proof it was always one instant.
+
+timezone = Europe/Vienna
+now                              # home
+
+timezone = America/New_York
+now                              # the team
+
+timezone = Asia/Tokyo
+now                              # already tomorrow
+
+timezone = America/Los_Angeles
+now                              # still yesterday's afternoon
+`,
   "two zones, one timeline": `# The lens re-aims mid-program: each half reads and shows civil time in
 # its own zone, but underneath everything is one UTC timeline — which is
 # how one program will eventually hold two people's calendars.
@@ -355,7 +373,7 @@ function render(rebuild) {
     if (!out.queries.length) {
       const d = document.createElement("div");
       d.className = "empty";
-      d.textContent = "No questions yet — ask with `until`, `since`, `days of`, `length of`, `partition`, `rolling days of`, or `slots of`.";
+      d.textContent = "No questions yet — ask with `now`, `until`, `since`, `days of`, `length of`, `partition`, `rolling days of`, or `slots of`.";
       cards.appendChild(d);
     }
     for (const q of out.queries) cards.appendChild(buildCard(q));
@@ -371,6 +389,9 @@ function buildCard(q) {
   if (q.kind === "until" || q.kind === "since") {
     c.innerHTML = `<div class="cap"><span><b></b></span><span class="tz"></span></div>
       <div class="when"></div><div class="big"></div><div class="verdict"></div><canvas height="56"></canvas>`;
+  } else if (q.kind === "now") {
+    c.innerHTML = `<div class="cap"><span><b></b></span><span class="tz"></span></div>
+      <div class="when"></div><div class="big"></div><canvas height="26"></canvas>`;
   } else if (q.kind === "partition") {
     c.innerHTML = `<div class="cap"><span><b></b></span><span class="tz"></span></div>
       <canvas></canvas><div class="segtable"></div>`;
@@ -393,6 +414,7 @@ function buildCard(q) {
 function updateCard(c, q, now) {
   c.querySelector(".tz").textContent = q.zone;
   if (q.kind === "until" || q.kind === "since") updateCountdown(c, q, now);
+  else if (q.kind === "now") updateNow(c, q, now);
   else if (q.kind === "partition") updatePartition(c, q);
   else if (q.kind === "rolling") updateRolling(c, q, now);
   else if (q.kind === "slots") updateSlots(c, q);
@@ -546,6 +568,35 @@ function updateCountdown(c, q, now) {
     ? (q.kind === "until" ? `passed ${Z.formatDuration(bd)} ago` : `hasn't happened yet — ${Z.formatDuration(bd)} from now`)
     : "";
   drawCountdown(c.querySelector("canvas"), q, now);
+}
+
+// the world clock: the current instant read through this card's lens.
+// The same `now` under three zones is three wall times of one moment.
+function updateNow(c, q, now) {
+  const p2 = (n) => String(n).padStart(2, "0");
+  const f = Z.epochToCivil(now, q.zone);
+  const wd = new Intl.DateTimeFormat("en-US", { timeZone: q.zone, weekday: "long" }).format(now);
+  const off = Z.formatOffset(Z.zoneOffset(now, q.zone));
+  c.querySelector("b").textContent = "now";
+  c.querySelector(".when").textContent = `${wd} · ${f.y}-${p2(f.mo)}-${p2(f.d)}`;
+  c.querySelector(".big").innerHTML =
+    `<span class="seg"><span class="n">${p2(f.h)}:${p2(f.mi)}:${p2(f.s)}</span><span class="u">${off}</span></span>`;
+  drawDayBar(c.querySelector("canvas"), f);
+}
+
+// a thin midnight→midnight bar with a marker at the current time — so a
+// glance shows Tokyo near the start of its day, New York mid-afternoon
+function drawDayBar(canvas, f) {
+  const H = 26;
+  const { ctx, W } = setupCanvas(canvas, H);
+  const pad = 2, y = Math.round(H / 2), w = W - pad * 2;
+  const frac = (f.h * 3600 + f.mi * 60 + f.s) / 86400;
+  ctx.strokeStyle = "#d8d2c4"; ctx.lineWidth = 3; ctx.lineCap = "round";
+  ctx.beginPath(); ctx.moveTo(pad, y); ctx.lineTo(pad + w, y); ctx.stroke();
+  ctx.strokeStyle = "#3d4f9e";
+  ctx.beginPath(); ctx.moveTo(pad, y); ctx.lineTo(pad + w * frac, y); ctx.stroke();
+  ctx.fillStyle = "#3d4f9e";
+  ctx.beginPath(); ctx.arc(pad + w * frac, y, 4, 0, 7); ctx.fill();
 }
 
 function updateMeasure(c, q) {

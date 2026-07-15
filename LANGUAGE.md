@@ -1,4 +1,4 @@
-# Zeitfolge — language spec v0.9
+# Zeitfolge — language spec v0.10
 
 A small, code-first language for working with time — asking questions about
 it, and doing algebra on stretches of it. The same source is the data, the
@@ -43,7 +43,8 @@ v0.6 by recurring availability — "every weekday, nine to five"; v0.7 by
 the safe-restart question — "where is the latest stretch where only one
 credit block is active?"; v0.8 by `go_to_airport = flight - 3 hours`;
 v0.9 by embedding again — "the overlap should say which blocks it came
-from, so the caller can join the answer back to its own data."
+from, so the caller can join the answer back to its own data"; v0.10 by
+the remote worker's wall — "what time is it, right now, for everyone?"
 
 ## Try it live
 
@@ -70,6 +71,7 @@ timezone = <IANA zone>        aim the lens (default: UTC)
 <name> = <expression>         bind a value — an instant or a set of intervals
 <name> = every <days> [HH:MM .. HH:MM]
                               define a recurrence (its own statement form)
+now                           what time is it, right now, through the lens?
 until <instant>               how long from now until it?
 since <instant>               how long from it until now?
 days of <intervals>           civil days touched, through the lens
@@ -89,6 +91,37 @@ next line**, so a real trip list reads like data:
 trips = 2025-12-15 .. 2025-12-23,
         2026-03-27 .. 2026-05-11
 ```
+
+## now — a clock, and a world clock
+
+`now` on its own line is the smallest verb: no operand, it just reads the
+present instant through the lens in force and shows it as a live-ticking
+clock. It is `until` with the target dropped — take away *how long until
+the target* and what remains is *what time it is*.
+
+The point of a verb this small is stacking it under different lenses:
+
+```
+timezone = Europe/Vienna
+now                              # home
+
+timezone = America/New_York
+now                              # the team
+
+timezone = Asia/Tokyo
+now                              # already tomorrow
+```
+
+Three clocks, three wall times, **one instant** — the page is a world
+clock. The UTC view makes the claim literal: because there is no verb to
+display a bare instant literal, `now` cannot be frozen the way an instant
+binding is; instead every line collapses to an identical `now` under the
+single `timezone = UTC` at the top — visible proof they were the same
+moment all along, only differently presented.
+
+Deliberately narrow: only the bare keyword, only the present. Letting *any*
+instant render as a clock (so a bound `standup` on its own line shows its
+wall time) is a natural next step, left until an example asks for it.
 
 ## Values
 

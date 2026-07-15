@@ -1,0 +1,17 @@
+# The remote worker's wall: what time is it, right now, for everyone?
+# `now` is `until` with the target dropped — what's left is a clock,
+# read through whatever lens is in force. Stack the zones you live
+# across and the page IS a world clock; each ticks live. The UTC view
+# collapses them all to one `now` — proof it was always one instant.
+
+timezone = Europe/Vienna
+now                              # home
+
+timezone = America/New_York
+now                              # the team
+
+timezone = Asia/Tokyo
+now                              # already tomorrow
+
+timezone = America/Los_Angeles
+now                              # still yesterday's afternoon

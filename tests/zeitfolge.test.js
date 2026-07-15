@@ -85,6 +85,38 @@ test("until accepts a literal and `now` directly", () => {
   assert.equal(out.queries[1].diffMs, 0);
 });
 
+test("now: one instant, many lenses — same ms, wall time set by the lens", () => {
+  const out = run([
+    "timezone = Europe/Vienna",
+    "now",
+    "timezone = America/New_York",
+    "now",
+    "timezone = Asia/Tokyo",
+    "now",
+  ].join("\n"));
+  const clocks = out.queries.filter((q) => q.kind === "now");
+  assert.equal(clocks.length, 3);
+  // the same instant underneath — NOW, verbatim — regardless of lens
+  assert.deepEqual(clocks.map((q) => q.ms), [NOW, NOW, NOW]);
+  assert.deepEqual(clocks.map((q) => q.zone),
+    ["Europe/Vienna", "America/New_York", "Asia/Tokyo"]);
+  // but the lens sets the wall time: 12:00 UTC → 14 Vienna, 08 NY, 21 Tokyo
+  assert.equal(Z.epochToCivil(clocks[0].ms, clocks[0].zone).h, 14);
+  assert.equal(Z.epochToCivil(clocks[1].ms, clocks[1].zone).h, 8);
+  assert.equal(Z.epochToCivil(clocks[2].ms, clocks[2].zone).h, 21);
+});
+
+test("desugar collapses a world clock to one instant: identical `now`s under UTC", () => {
+  const out = run("timezone = Europe/Vienna\nnow\ntimezone = Asia/Tokyo\nnow");
+  const sugarFree = Z.desugar(out);
+  const nowLines = sugarFree.split("\n").filter((l) => l.startsWith("now"));
+  assert.equal(nowLines.length, 2);
+  // both re-read under the single UTC lens the desugarer declares up top
+  assert.match(sugarFree, /^timezone = UTC$/m);
+  // and running the desugared program is still error-free
+  assert.deepEqual(Z.evaluate(sugarFree, { now: NOW }).errors, []);
+});
+
 test("since: elapsed time, and a future target counts as not yet passed", () => {
   const out = run("since 2026-07-12 11:00\nsince 2026-07-12 13:00");
   assert.equal(out.queries[0].diffMs, Z.MS.hour);

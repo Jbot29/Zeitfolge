@@ -132,7 +132,7 @@
 })(typeof self !== "undefined" ? self : this, function () {
 "use strict";
 
-const VERSION = "0.9";
+const VERSION = "0.10";
 const MS = { second: 1000, minute: 60000, hour: 3600000, day: 86400000 };
 
 /* ---------------------------------------------------------------------
@@ -958,6 +958,14 @@ function evaluate(src, opts) {
                   diffMs: diff, passed: diff < 0, breakdown: breakdown(diff), toks: target.toks };
       queries.push(q); statements.push(q);
 
+    // now — the bare present, read through the lens in force. No operand:
+    // it is "until"/"since" with the target dropped, so what's left is
+    // just a clock. Stack a few under different lenses and you have a
+    // world clock — the same instant, many wall times.
+    } else if (/^now$/.test(text)) {
+      const q = { kind: "now", ms: now, zone, line: ln };
+      queries.push(q); statements.push(q);
+
     // rolling days of X in N days [limit M] — the windowed aggregation:
     // for every civil day, the usage inside the trailing N-day window
     } else if ((m = text.match(/^rolling\s+days\s+of\s+(.+?)\s+in\s+(\d+)\s+days?(?:\s+limit\s+(\d+))?\s*$/))) {
@@ -1125,6 +1133,11 @@ function desugar(program) {
     else if (st.kind === "slots")
       out.push(`slots of ${rebuildToks(st.toks)} every ${st.every}${note}`);
     else if (st.kind === "show") out.push(`show ${rebuildToks(st.toks)}${note}`);
+    // a clock cannot be frozen to a literal — the language has no verb to
+    // display a bare instant — so it stays `now`, but under the UTC lens.
+    // A stack of world-clock lines collapses here to identical `now`s:
+    // proof they were always one instant, only differently presented.
+    else if (st.kind === "now") out.push(`now${st.zone !== "UTC" ? `   # was read in ${st.zone}` : ""}`);
   }
   return out.join("\n");
 }
