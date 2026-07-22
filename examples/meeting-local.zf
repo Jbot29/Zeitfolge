@@ -1,0 +1,15 @@
+# The inbound question: someone sends a meeting in THEIR zone — what time
+# is that for me? Store each instant once, in the sender's zone, then
+# re-aim the lens to mine and name it again. A bare instant on a line is
+# a clock: it reads that instant as a wall time through the lens in force.
+
+timezone = America/Los_Angeles
+standup = 2026-07-23 7:00         # a teammate's 7am
+
+timezone = Asia/Tokyo
+review = 2026-07-24 18:00         # and an 18:00 in Tokyo
+
+# now read them both in my zone — one lens, both clocks land locally
+timezone = Europe/Vienna
+standup                           # → 16:00 for me
+review                           # → 11:00 for me, and it's the 24th here too

@@ -132,7 +132,7 @@
 })(typeof self !== "undefined" ? self : this, function () {
 "use strict";
 
-const VERSION = "0.10";
+const VERSION = "0.11";
 const MS = { second: 1000, minute: 60000, hour: 3600000, day: 86400000 };
 
 /* ---------------------------------------------------------------------
@@ -958,14 +958,6 @@ function evaluate(src, opts) {
                   diffMs: diff, passed: diff < 0, breakdown: breakdown(diff), toks: target.toks };
       queries.push(q); statements.push(q);
 
-    // now — the bare present, read through the lens in force. No operand:
-    // it is "until"/"since" with the target dropped, so what's left is
-    // just a clock. Stack a few under different lenses and you have a
-    // world clock — the same instant, many wall times.
-    } else if (/^now$/.test(text)) {
-      const q = { kind: "now", ms: now, zone, line: ln };
-      queries.push(q); statements.push(q);
-
     // rolling days of X in N days [limit M] — the windowed aggregation:
     // for every civil day, the usage inside the trailing N-day window
     } else if ((m = text.match(/^rolling\s+days\s+of\s+(.+?)\s+in\s+(\d+)\s+days?(?:\s+limit\s+(\d+))?\s*$/))) {
@@ -1069,8 +1061,24 @@ function evaluate(src, opts) {
         statements.push({ kind: "bind", name, valueType: "set", members, zone, line: ln, toks: v.toks });
       }
 
+    // a bare expression on its own line. An INSTANT becomes a clock —
+    // read through the lens in force and shown as its wall time. This is
+    // `now` generalized: `now` is simply the bare instant whose value is
+    // the present. Put a meeting in its owner's zone, re-aim the lens,
+    // and name it again to read it in yours.
     } else {
-      err(ln, `unrecognized statement (expected 'timezone =', '<name> =', 'until', 'since', 'days of', 'length of', or 'partition'): "${clip(text)}"`);
+      const v = parseExpr(text, ln);
+      if (!v) continue;                        // parseExpr already said why
+      if (v.t === "inst") {
+        const q = { kind: "now", ms: v.ms, zone, line: ln, label: text };
+        queries.push(q); statements.push(q);
+      } else if (v.t === "set") {
+        err(ln, `"${clip(text)}" is a stretch of time, not an instant — ask "show ${clip(text)}", "days of …", or "length of …"`);
+      } else if (v.t === "dur") {
+        err(ln, `"${clip(text)}" is a duration — anchor it to an instant to read a time, e.g. now + ${clip(text)}`);
+      } else {
+        err(ln, `"${clip(text)}" is a recurrence — bound it to a clock, e.g. next 1 of ${clip(text)}`);
+      }
     }
   }
 
@@ -1133,11 +1141,15 @@ function desugar(program) {
     else if (st.kind === "slots")
       out.push(`slots of ${rebuildToks(st.toks)} every ${st.every}${note}`);
     else if (st.kind === "show") out.push(`show ${rebuildToks(st.toks)}${note}`);
-    // a clock cannot be frozen to a literal — the language has no verb to
-    // display a bare instant — so it stays `now`, but under the UTC lens.
-    // A stack of world-clock lines collapses here to identical `now`s:
+    // a clock is just a bare instant — and a bare instant literal is now
+    // a display statement, so it freezes to its resolved UTC literal like
+    // any other instant (this is what freezes `now` at evaluation time).
+    // A stack of world-clock lines collapses here to identical literals:
     // proof they were always one instant, only differently presented.
-    else if (st.kind === "now") out.push(`now${st.zone !== "UTC" ? `   # was read in ${st.zone}` : ""}`);
+    else if (st.kind === "now")
+      out.push(`${formatCivil(epochToCivil(st.ms, "UTC"))}${/^[A-Za-z_]/.test(st.label || "")
+        ? `   # was: ${st.label}${st.zone !== "UTC" ? ` (${st.zone})` : ""}`
+        : st.zone !== "UTC" ? `   # was read in ${st.zone}` : ""}`);
   }
   return out.join("\n");
 }

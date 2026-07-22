@@ -106,15 +106,45 @@ test("now: one instant, many lenses — same ms, wall time set by the lens", () 
   assert.equal(Z.epochToCivil(clocks[2].ms, clocks[2].zone).h, 21);
 });
 
-test("desugar collapses a world clock to one instant: identical `now`s under UTC", () => {
+test("desugar collapses a world clock to one frozen instant under UTC", () => {
   const out = run("timezone = Europe/Vienna\nnow\ntimezone = Asia/Tokyo\nnow");
   const sugarFree = Z.desugar(out);
-  const nowLines = sugarFree.split("\n").filter((l) => l.startsWith("now"));
-  assert.equal(nowLines.length, 2);
-  // both re-read under the single UTC lens the desugarer declares up top
+  // both `now` lines freeze to the SAME resolved UTC literal — 2026-07-12
+  // 12:00 — visible proof they were one instant, differently presented
+  const clockLines = sugarFree.split("\n").filter((l) => l.startsWith("2026-07-12 12:00"));
+  assert.equal(clockLines.length, 2);
   assert.match(sugarFree, /^timezone = UTC$/m);
-  // and running the desugared program is still error-free
-  assert.deepEqual(Z.evaluate(sugarFree, { now: NOW }).errors, []);
+  // and the desugared program still evaluates without error
+  const round = Z.evaluate(sugarFree, { now: NOW });
+  assert.deepEqual(round.errors, []);
+  // …to the same two instants it started from
+  assert.deepEqual(round.queries.filter((q) => q.kind === "now").map((q) => q.ms), [NOW, NOW]);
+});
+
+test("a bare bound instant is a clock, read through the lens in force", () => {
+  // a meeting written in its owner's zone, then read in mine
+  const out = run([
+    "timezone = America/Los_Angeles",
+    "meeting = 2026-07-23 7:00",
+    "timezone = Europe/Vienna",
+    "meeting",
+  ].join("\n"));
+  const clock = out.queries.find((q) => q.kind === "now");
+  assert.equal(clock.label, "meeting");
+  assert.equal(clock.zone, "Europe/Vienna");
+  // 07:00 PDT (UTC-7) is 14:00 UTC is 16:00 CEST — my local time for it
+  assert.equal(clock.ms, Date.UTC(2026, 6, 23, 14));
+  assert.equal(Z.epochToCivil(clock.ms, clock.zone).h, 16);
+});
+
+test("a bare instant literal is a clock; a bare set is not", () => {
+  const out = run("timezone = UTC\n2026-07-23 16:00");
+  assert.equal(out.queries[0].kind, "now");
+  assert.equal(out.queries[0].ms, Date.UTC(2026, 6, 23, 16));
+  // a stretch of time has width — it's not a clock; point elsewhere
+  const errs = Z.evaluate("s = 2026-07-23 .. 2026-07-25\ns", { now: NOW }).errors.map((e) => e.msg);
+  assert.equal(errs.length, 1);
+  assert.match(errs[0], /not an instant/);
 });
 
 test("since: elapsed time, and a future target counts as not yet passed", () => {
@@ -765,7 +795,8 @@ test("bad zone, unreal date, unreal time, unbound name, unknown statement", () =
   assert.match(errorsOf("d = 2026-02-30")[0], /not a real calendar date/);
   assert.match(errorsOf("d = 2026-07-17 25:00")[0], /not a real time of day/);
   assert.match(errorsOf("until flight")[0], /not bound/);
-  assert.match(errorsOf("flight leaves friday")[0], /unrecognized statement/);
+  assert.match(errorsOf("flight leaves friday")[0], /not bound/);      // bare expr: unbound name
+  assert.match(errorsOf("2026-07-17 .. 2026-07-19")[0], /not an instant/);  // bare set isn't a clock
   assert.match(errorsOf("now = 2026-01-01")[0], /reserved word/);
 });
 

@@ -1,4 +1,4 @@
-# Zeitfolge — language spec v0.10
+# Zeitfolge — language spec v0.11
 
 A small, code-first language for working with time — asking questions about
 it, and doing algebra on stretches of it. The same source is the data, the
@@ -44,7 +44,9 @@ the safe-restart question — "where is the latest stretch where only one
 credit block is active?"; v0.8 by `go_to_airport = flight - 3 hours`;
 v0.9 by embedding again — "the overlap should say which blocks it came
 from, so the caller can join the answer back to its own data"; v0.10 by
-the remote worker's wall — "what time is it, right now, for everyone?"
+the remote worker's wall — "what time is it, right now, for everyone?";
+v0.11 by the same wall turned around — "someone sent a meeting in their
+zone; what time is that for me?"
 
 ## Try it live
 
@@ -71,7 +73,8 @@ timezone = <IANA zone>        aim the lens (default: UTC)
 <name> = <expression>         bind a value — an instant or a set of intervals
 <name> = every <days> [HH:MM .. HH:MM]
                               define a recurrence (its own statement form)
-now                           what time is it, right now, through the lens?
+<instant>                     a bare instant on a line — read it as a clock
+now                           the clock whose instant is the present
 until <instant>               how long from now until it?
 since <instant>               how long from it until now?
 days of <intervals>           civil days touched, through the lens
@@ -92,14 +95,13 @@ trips = 2025-12-15 .. 2025-12-23,
         2026-03-27 .. 2026-05-11
 ```
 
-## now — a clock, and a world clock
+## A bare instant is a clock
 
-`now` on its own line is the smallest verb: no operand, it just reads the
-present instant through the lens in force and shows it as a live-ticking
-clock. It is `until` with the target dropped — take away *how long until
-the target* and what remains is *what time it is*.
+An instant on its own line — a bound name, a literal, an arithmetic
+expression — is read through the lens in force and shown as its **wall
+time**: a clock face. There is no verb; the instant *is* the statement.
 
-The point of a verb this small is stacking it under different lenses:
+`now` is the special case whose instant is the present, so it ticks:
 
 ```
 timezone = Europe/Vienna
@@ -113,15 +115,27 @@ now                              # already tomorrow
 ```
 
 Three clocks, three wall times, **one instant** — the page is a world
-clock. The UTC view makes the claim literal: because there is no verb to
-display a bare instant literal, `now` cannot be frozen the way an instant
-binding is; instead every line collapses to an identical `now` under the
-single `timezone = UTC` at the top — visible proof they were the same
-moment all along, only differently presented.
+clock. Turn it around and the same rule answers the inbound question —
+*someone sent a meeting in their zone; what is that for me?*
 
-Deliberately narrow: only the bare keyword, only the present. Letting *any*
-instant render as a clock (so a bound `standup` on its own line shows its
-wall time) is a natural next step, left until an example asks for it.
+```
+timezone = America/Los_Angeles
+meeting = 2026-07-23 7:00         # written in the sender's zone
+
+timezone = Europe/Vienna
+meeting                          # → Thu 2026-07-23 16:00 — my wall time
+```
+
+The instant is stored once, at one UTC millisecond; naming it again under
+a new lens just re-reads it. The UTC view makes that literal: every clock
+freezes to its resolved UTC literal (a bare literal is itself a valid
+clock statement), so a world clock collapses to identical literals — the
+same moment all along, only differently presented.
+
+Only instants become clocks. A set has width (`show`, `days of`, `length
+of` are its verbs); a duration has no position (anchor it to an instant);
+a recurrence is unbounded (bound it) — each is refused with a pointer to
+the verb that fits.
 
 ## Values
 
