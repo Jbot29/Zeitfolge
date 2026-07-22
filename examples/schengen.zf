@@ -12,11 +12,4 @@ days of trips & last 180 days          # used as of today
 
 rolling days of trips in 180 days limit 90
 
-trips = 2026-06-16 .. 2026-07-03,
-        2026-07-07 .. 2026-07-17,
-        2026-08-10 .. 2026-10-13
-
-days of trips & last 180 days          # used as of today
-
-rolling days of trips in 180 days limit 90
 
