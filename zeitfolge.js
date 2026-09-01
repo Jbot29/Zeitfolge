@@ -132,7 +132,7 @@
 })(typeof self !== "undefined" ? self : this, function () {
 "use strict";
 
-const VERSION = "0.11";
+const VERSION = "0.17";
 const MS = { second: 1000, minute: 60000, hour: 3600000, day: 86400000 };
 
 /* ---------------------------------------------------------------------
@@ -549,11 +549,16 @@ function clip(s) { return s.length > 40 ? s.slice(0, 40) + "…" : s; }
  * ------------------------------------------------------------------- */
 const RESERVED = new Set(["timezone", "until", "since", "now", "days", "length", "of", "partition",
                           "last", "in", "limit", "rolling", "day", "slots", "every", "load",
-                          "first", "next", "alone", "shared", "show"]);
+                          "first", "next", "alone", "shared", "show", "assert", "as", "calendar"]);
 
 function evaluate(src, opts) {
   opts = opts || {};
-  const now = opts.now != null ? opts.now : Date.now();
+  const baseNow = opts.now != null ? opts.now : Date.now();
+  // `now` is the present the current statement reads — normally baseNow, but
+  // `as of <instant>` re-points it for one line, so a program can be run at a
+  // hypothetical present. Every now-relative verb closes over this variable,
+  // so they all honour it at once, with no per-verb code.
+  let now = baseNow;
   const data = opts.data || null;
   const errors = [], warnings = [];
   const err  = (ln, msg) => errors.push({ line: ln, msg });
@@ -671,7 +676,9 @@ function evaluate(src, opts) {
         const p = parseLiteral(t.text, ln);
         if (!p) return null;
         t.ms = p.ms; t.f = p.f;
-        return { t: "inst", ms: p.ms, litTok: t };
+        // a bare date ("2026-08-10") carries no time-of-day; a datetime does.
+        // The bit rides along so a clock knows whether to show hours at all.
+        return { t: "inst", ms: p.ms, litTok: t, dateOnly: !t.hasTime };
       }
       if (t.kind === "name" && t.text === "load") {
         // load "key" — external data, resolved at evaluation time. The
@@ -729,7 +736,7 @@ function evaluate(src, opts) {
         if (t.text === "every") return fail(`a recurrence is its own statement — e.g. hours = every weekday 09:00 .. 17:00`);
         const b = bindings[t.text];
         if (!b) return fail(`"${t.text}" is not bound — bind it first, e.g. ${t.text} = 2026-07-17 10:00`);
-        return b.type === "instant" ? { t: "inst", ms: b.ms }
+        return b.type === "instant" ? { t: "inst", ms: b.ms, dateOnly: b.dateOnly }
              : b.type === "rule" ? { t: "rule", rule: b.rule }
              : b.type === "duration" ? { t: "dur", ...b.dur }
              : { t: "set", members: b.members.map((m) => ({ ...m })) };
@@ -807,7 +814,9 @@ function evaluate(src, opts) {
         if (!b) return null;
         if (b.t === "dur") {                     // instant ± duration
           if (a.t !== "inst") return fail(`"${op} <duration>" works on an instant — shifting whole intervals isn't defined (yet)`);
-          a = { t: "inst", ms: applyDur(a.ms, b, op === "+" ? 1 : -1) };
+          // a whole-day step (b.ms === 0) keeps a date a date; adding hours,
+          // minutes or seconds introduces a time-of-day, so it's no longer date-only
+          a = { t: "inst", ms: applyDur(a.ms, b, op === "+" ? 1 : -1), dateOnly: b.ms === 0 ? a.dateOnly : false };
           continue;
         }
         if (op === "+") return fail(`"+" adds a duration to an instant — e.g. flight + 3 hours (sets combine with | or ,)`);
@@ -929,17 +938,62 @@ function evaluate(src, opts) {
     return v;
   }
 
+  // <expr> in <zone> — a trailing PRESENTATION override on a display verb:
+  // read as usual (through the lens in force), then show in this zone. It's
+  // the lens's show-side, inline, for one line. Interpretation is untouched
+  // — to READ a literal in another zone, aim the lens with `timezone =`.
+  // Disambiguated from structural `in` (alone in, rolling … in n days) by
+  // requiring the tail to be a real IANA zone.
+  function splitZone(text) {
+    // the body before `in` is optional, so a bare `calendar in Asia/Tokyo`
+    // (no operand — just this month, in that zone) splits too
+    const mm = text.match(/^(?:(.*\S)\s+)?in\s+([\w/+\-]+)\s*$/);
+    if (mm && isValidZone(mm[2])) return { body: (mm[1] || "").trim(), showZone: mm[2] };
+    return { body: text, showZone: null };
+  }
+
+  // a comparable measure for `assert`: a civil-day count or a plain number.
+  // Both sides of an assertion reduce to one of these, so `days of X <= 90`
+  // and `days of a <= days of b` are the same shape.
+  function assertScalar(text, ln) {
+    let mm;
+    if ((mm = text.match(/^days\s+of\b\s*(.*)$/))) {
+      const v = resolveSet(mm[1].trim(), ln, "days of");
+      if (!v) return null;
+      return { kind: "days", value: daysTouched(v.members, zone), expr: mm[1].trim(), toks: v.toks };
+    }
+    if (/^\d+$/.test(text)) return { kind: "num", value: parseInt(text, 10), expr: text, toks: [] };
+    err(ln, `"${clip(text)}" isn't a measure I can compare — use "days of <intervals>" or a number`);
+    return null;
+  }
+
   // logical lines: a line ending in an operator continues on the next —
   // so a real trip list can be written one interval per line
   const raw = String(src).split("\n").map((l, i) => ({ ln: i + 1, text: l.replace(/#.*$/, "").trim() }));
   const lines = [];
   for (const r of raw) {
+    if (r.text === "") continue;   // blank or comment-only line — transparent, even mid-continuation
     const prev = lines[lines.length - 1];
     if (prev && /[,&|]$|\.\.$|(^|[\s(])-$/.test(prev.text)) prev.text += " " + r.text;
-    else if (r.text !== "") lines.push({ ln: r.ln, text: r.text });
+    else lines.push({ ln: r.ln, text: r.text });
   }
 
-  for (const { ln, text } of lines) {
+  for (const { ln, text: line } of lines) {
+
+    now = baseNow;                        // reset the present for each statement
+    let text = line, asOfMs = null;
+    // <statement> as of <instant> — read this line at a hypothetical present.
+    // The instant is resolved with the real now first (so `as of now + 3 days`
+    // works), then it becomes `now` for the rest of the line. The heavy lifting
+    // is free: `last N days`, `until`, `now`, `next`, and `rolling` all read the
+    // same `now`, so the whole line time-travels together.
+    const ao = text.match(/^(.*?)\s+as\s+of\s+(.+)$/);
+    if (ao) {
+      const at = resolveInstant(ao[2].trim(), ln);
+      if (!at) continue;                  // resolveInstant already said why
+      asOfMs = at.ms; now = at.ms; text = ao[1].trim();
+    }
+    const qStart = queries.length;
 
     let m;
     // timezone = Europe/Vienna — re-aim the lens for the lines below
@@ -990,11 +1044,74 @@ function evaluate(src, opts) {
     } else if (/^slots\b/.test(text)) {
       err(ln, `slots needs the full form: slots of <intervals> every <n> minutes`);
 
+    // assert — the verification verb. A program states what must hold and
+    // checks itself: a rolling limit that must never breach, or a comparison
+    // of two measures. A failed assertion is a false proposition, not a
+    // broken program — it's a query with ok:false, so a host can gate CI on it.
+    } else if ((m = text.match(/^assert\b\s*(.*)$/))) {
+      const body = m[1].trim();
+      let mm, q = null;
+      if (!body) { err(ln, `assert what? — e.g. assert days of trips & last 180 days <= 90`); continue; }
+
+      // assert rolling days of X in N days limit M — the limit is never breached
+      if ((mm = body.match(/^rolling\s+days\s+of\s+(.+?)\s+in\s+(\d+)\s+days?\s+limit\s+(\d+)\s*$/))) {
+        const v = resolveSet(mm[1].trim(), ln, "assert rolling days of");
+        if (!v) continue;
+        const windowDays = parseInt(mm[2], 10), limit = parseInt(mm[3], 10);
+        if (windowDays < 1) { err(ln, `the window must be at least 1 day`); continue; }
+        const r = rollingDays(v.members, windowDays, zone);
+        if (r.truncated) warn(ln, `rolling series truncated at ${ROLLING_CAP} days`);
+        const peak = r.series.reduce((a, b) => (b.value > a.value ? b : a), { value: 0, ms: now });
+        q = { kind: "assert", form: "rolling", claim: body, expr: mm[1].trim(), zone, line: ln, toks: v.toks,
+              ok: r.max <= limit, windowDays, limit, peak: r.max, peakMs: peak.ms };
+
+      } else if (/^rolling\b/.test(body)) {
+        err(ln, `assert rolling needs a limit: assert rolling days of <intervals> in <n> days limit <m>`); continue;
+
+      // assert <measure> <cmp> <measure> — a comparison that must hold
+      } else if ((mm = body.match(/^(.*?)\s*(<=|>=|!=|==|<|>|=)\s*(.*)$/))) {
+        const op = mm[2] === "==" ? "=" : mm[2];
+        const lhs = assertScalar(mm[1].trim(), ln), rhs = assertScalar(mm[3].trim(), ln);
+        if (!lhs || !rhs) continue;
+        const ok = op === "<=" ? lhs.value <= rhs.value : op === ">=" ? lhs.value >= rhs.value
+                 : op === "<"  ? lhs.value <  rhs.value : op === ">"  ? lhs.value >  rhs.value
+                 : op === "!=" ? lhs.value !== rhs.value : lhs.value === rhs.value;
+        q = { kind: "assert", form: "compare", claim: body, zone, line: ln,
+              toks: [...lhs.toks, ...rhs.toks], ok, op, lhs, rhs };
+
+      } else {
+        err(ln, `assert wants a proposition — a comparison (days of X <= 90) or a rolling limit (rolling days of X in 180 days limit 90)`); continue;
+      }
+      queries.push(q); statements.push(q);
+
     // show — the interrogation verb: is it there, and where?
     } else if ((m = text.match(/^show\b\s*(.*)$/))) {
-      const v = resolveSet(m[1].trim(), ln, "show");
+      const { body, showZone } = splitZone(m[1].trim());
+      const v = resolveSet(body, ln, "show");
       if (!v) continue;
-      const q = { kind: "show", expr: m[1].trim(), members: v.members, zone, line: ln, toks: v.toks };
+      const q = { kind: "show", expr: body, members: v.members, zone: showZone || zone, lensZone: zone, line: ln, toks: v.toks };
+      queries.push(q); statements.push(q);
+
+    // calendar — `now` zoomed out to a month. Bare, it's the current month
+    // through the lens, today marked; given an instant, that instant's month
+    // with its day marked. A place to orient while planning, without leaving.
+    } else if ((m = text.match(/^calendar\b\s*(.*)$/)) && !/^=/.test(m[1])) {
+      const { body, showZone } = splitZone(m[1].trim());
+      const dz = showZone || zone;
+      let q = null;
+      if (body === "") {
+        // bare: the current month, today marked
+        q = { kind: "calendar", ms: now, members: [], zone: dz, lensZone: zone, line: ln, label: "now" };
+      } else {
+        const v = parseExpr(body, ln);
+        if (!v) continue;
+        if (v.t === "inst")        // an instant: that month, that day marked
+          q = { kind: "calendar", ms: v.ms, members: [], zone: dz, lensZone: zone, line: ln, label: body, toks: v.toks };
+        else if (v.t === "set")    // a stretch: every month it spans, its days shaded, today still marked
+          q = { kind: "calendar", ms: now, members: v.members, zone: dz, lensZone: zone, line: ln, label: body, toks: v.toks };
+        else if (v.t === "dur") { err(ln, `"${clip(body)}" is a duration — calendar wants a moment or a stretch; anchor it to an instant first`); continue; }
+        else { err(ln, `"${clip(body)}" is a recurrence — bound it first (e.g. next 6 of ${clip(body)}), then calendar it`); continue; }
+      }
       queries.push(q); statements.push(q);
 
     // days of / length of — the two measures (civil vs absolute)
@@ -1044,7 +1161,7 @@ function evaluate(src, opts) {
       if (!v) continue;
       if (bindings[name]) warn(ln, `"${name}" rebound; using the new value`);
       if (v.t === "inst") {
-        bindings[name] = { type: "instant", ms: v.ms, zone, line: ln };
+        bindings[name] = { type: "instant", ms: v.ms, zone, line: ln, dateOnly: v.dateOnly };
         statements.push({ kind: "bind", name, valueType: "instant", ms: v.ms, zone, line: ln, toks: v.toks });
       } else if (v.t === "dur") {
         bindings[name] = { type: "duration", dur: { ms: v.ms, days: v.days }, zone, line: ln };
@@ -1067,10 +1184,11 @@ function evaluate(src, opts) {
     // the present. Put a meeting in its owner's zone, re-aim the lens,
     // and name it again to read it in yours.
     } else {
-      const v = parseExpr(text, ln);
+      const { body, showZone } = splitZone(text);
+      const v = parseExpr(body, ln);
       if (!v) continue;                        // parseExpr already said why
       if (v.t === "inst") {
-        const q = { kind: "now", ms: v.ms, zone, line: ln, label: text };
+        const q = { kind: "now", ms: v.ms, zone: showZone || zone, lensZone: zone, line: ln, label: body, dateOnly: !!v.dateOnly };
         queries.push(q); statements.push(q);
       } else if (v.t === "set") {
         err(ln, `"${clip(text)}" is a stretch of time, not an instant — ask "show ${clip(text)}", "days of …", or "length of …"`);
@@ -1080,9 +1198,12 @@ function evaluate(src, opts) {
         err(ln, `"${clip(text)}" is a recurrence — bound it to a clock, e.g. next 1 of ${clip(text)}`);
       }
     }
+
+    // tag whatever this line produced with the present it was read at
+    if (asOfMs != null) for (let i = qStart; i < queries.length; i++) queries[i].asOf = asOfMs;
   }
 
-  return { statements, bindings, queries, errors, warnings, now, zone };
+  return { statements, bindings, queries, errors, warnings, now: baseNow, zone };
 }
 
 /* ---------------------------------------------------------------------
@@ -1093,17 +1214,18 @@ function evaluate(src, opts) {
  * proof that the timezone is a lens on presentation, not part of the
  * data.
  * ------------------------------------------------------------------- */
-function rebuildToks(toks) {
+function rebuildToks(toks, zone) {
+  zone = zone || "UTC";   // literals freeze to this lens's wall time (UTC unless a civil-count verb keeps its own)
   let out = "";
-  const ivl = (m) => `${formatCivil(epochToCivil(m.start, "UTC"))} .. ${formatCivil(epochToCivil(m.end, "UTC"))}`;
+  const ivl = (m) => `${formatCivil(epochToCivil(m.start, zone))} .. ${formatCivil(epochToCivil(m.end, zone))}`;
   for (const t of toks) {
     if (t.skip) continue;   // consumed by a `last N days` or a load — the resolution speaks for it
     const text = t.resolvedLoad
-                 ? (t.resolvedLoad.t === "inst" ? formatCivil(epochToCivil(t.resolvedLoad.ms, "UTC"))
+                 ? (t.resolvedLoad.t === "inst" ? formatCivil(epochToCivil(t.resolvedLoad.ms, zone))
                     : t.resolvedLoad.members.length === 1 ? ivl(t.resolvedLoad.members[0])
                     : `(${t.resolvedLoad.members.map(ivl).join(", ")})`)   // () when empty — the empty set
                : t.resolved ? ivl(t.resolved)
-               : t.kind === "lit" ? formatCivil(epochToCivil(t.ms, "UTC"))
+               : t.kind === "lit" ? formatCivil(epochToCivil(t.ms, zone))
                : t.kind === "name" || t.kind === "num" ? t.text : t.kind;
     const glue = out === "" || ",)".includes(t.kind) || out.endsWith("(") ? "" : " ";
     out += glue + text;
@@ -1113,10 +1235,22 @@ function rebuildToks(toks) {
 
 function desugar(program) {
   const out = ["# desugared — the lens removed: every instant at its UTC wall time", "timezone = UTC", ""];
+  // a civil-day COUNT (days of, rolling) is irreducibly civil — it depends on
+  // where midnight falls, so it cannot be reduced to UTC without changing the
+  // answer. Like a rule, its lens is re-aimed around it, not removed.
+  const civil = (lz, line) => {
+    if (lz === "UTC") { out.push(line); return; }
+    out.push(`timezone = ${lz}   # a civil-day count is irreducibly civil — read through the lens`);
+    out.push(line);
+    out.push(`timezone = UTC`);
+  };
   for (const st of program.statements) {
     if (st.kind === "timezone") continue;   // the lens dissolves
     const hadLit = st.toks && st.toks.some((t) => t.kind === "lit");
-    const note = hadLit && st.zone !== "UTC" ? `   # was written in ${st.zone}` : "";
+    // provenance follows the INTERPRETATION lens; a presentation `in <zone>`
+    // is display-only and dissolves with the lens, so use lensZone here
+    const lensZone = st.lensZone || st.zone;
+    const note = hadLit && lensZone !== "UTC" ? `   # was written in ${lensZone}` : "";
     if (st.kind === "bindrule") {
       // the honest limit: an instant dissolves into UTC, a rule cannot —
       // "Monday" is civil all the way down, so the lens is re-aimed
@@ -1134,13 +1268,32 @@ function desugar(program) {
     else if (st.kind === "bind") out.push(`${st.name} = ${rebuildToks(st.toks)}${note}`);
     else if (st.kind === "until" || st.kind === "since")
       out.push(`${st.kind} ${formatCivil(epochToCivil(st.targetMs, "UTC"))}${/^[A-Za-z_]/.test(st.label) ? `   # was: ${st.label}` : note}`);
-    else if (st.kind === "days" || st.kind === "length") out.push(`${st.kind} of ${rebuildToks(st.toks)}${note}`);
+    else if (st.kind === "days")
+      // days counts CIVIL days — keep its lens, or the count drifts across the offset
+      civil(lensZone, `days of ${rebuildToks(st.toks, lensZone)}`);
+    else if (st.kind === "length")
+      // length is ABSOLUTE milliseconds — lens-independent, safe in UTC
+      out.push(`length of ${rebuildToks(st.toks)}${note}`);
     else if (st.kind === "partition") out.push(`partition ${rebuildToks(st.toks)}${note}`);
     else if (st.kind === "rolling")
-      out.push(`rolling days of ${rebuildToks(st.toks)} in ${st.windowDays} days${st.limit != null ? ` limit ${st.limit}` : ""}${note}`);
+      // rolling counts civil days in each window — irreducibly civil, keep the lens
+      civil(lensZone, `rolling days of ${rebuildToks(st.toks, lensZone)} in ${st.windowDays} days${st.limit != null ? ` limit ${st.limit}` : ""}`);
     else if (st.kind === "slots")
       out.push(`slots of ${rebuildToks(st.toks)} every ${st.every}${note}`);
     else if (st.kind === "show") out.push(`show ${rebuildToks(st.toks)}${note}`);
+    else if (st.kind === "assert") {
+      // an assertion over civil-day counts is itself irreducibly civil
+      const hasCivil = st.form === "rolling" || st.lhs.kind === "days" || st.rhs.kind === "days";
+      const lz = hasCivil ? lensZone : "UTC";
+      let line;
+      if (st.form === "rolling")
+        line = `assert rolling days of ${rebuildToks(st.toks, lz)} in ${st.windowDays} days limit ${st.limit}`;
+      else {
+        const side = (s) => s.kind === "num" ? String(s.value) : `days of ${rebuildToks(s.toks, lz)}`;
+        line = `assert ${side(st.lhs)} ${st.op} ${side(st.rhs)}`;
+      }
+      civil(lz, line);
+    }
     // a clock is just a bare instant — and a bare instant literal is now
     // a display statement, so it freezes to its resolved UTC literal like
     // any other instant (this is what freezes `now` at evaluation time).
@@ -1150,6 +1303,12 @@ function desugar(program) {
       out.push(`${formatCivil(epochToCivil(st.ms, "UTC"))}${/^[A-Za-z_]/.test(st.label || "")
         ? `   # was: ${st.label}${st.zone !== "UTC" ? ` (${st.zone})` : ""}`
         : st.zone !== "UTC" ? `   # was read in ${st.zone}` : ""}`);
+    // a calendar is a display of a month (or a span of months) — freeze its
+    // instant, or its set, like a clock does
+    else if (st.kind === "calendar")
+      out.push(st.members && st.members.length
+        ? `calendar ${rebuildToks(st.toks)}${st.zone !== "UTC" ? `   # spanned in ${st.zone}` : ""}`
+        : `calendar ${formatCivil(epochToCivil(st.ms, "UTC"))}${st.zone !== "UTC" ? `   # was read in ${st.zone}` : ""}`);
   }
   return out.join("\n");
 }

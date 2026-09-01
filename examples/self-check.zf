@@ -1,0 +1,21 @@
+# A plan that checks itself. `assert` states what must hold and verifies
+# it — pure intent in the shared vocabulary, so a failure means the PLAN
+# is wrong, not the tool. This is the file you'd gate a CI job on: a host
+# runs it and exits non-zero if any assertion's ok is false.
+
+timezone = Europe/Vienna
+
+trips = 2025-12-15 .. 2025-12-23,
+        2026-03-27 .. 2026-05-11,
+        2026-07-03 .. 2026-07-08,
+        2026-07-17 .. 2026-08-10,
+        2026-11-01 .. 2026-11-13,
+        2027-02-09 .. 2027-05-01
+
+# the cap so far (a snapshot), and the cap across the whole plan (every
+# trailing 180-day window). The first holds; the second peaks over 90.
+assert days of trips & last 180 days <= 90
+assert rolling days of trips in 180 days limit 90
+
+# comparisons compose too — two measures, not just a measure and a number
+assert days of trips & last 180 days <= days of trips

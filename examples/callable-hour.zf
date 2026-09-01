@@ -1,0 +1,23 @@
+# Three teammates, three continents. When can all three take a call
+# without anyone being up at midnight? Define each person's waking hours
+# in THEIR zone, intersect, and read the answer in each zone with `in`.
+#
+# `in <zone>` is the lens's show-side, inline: read as usual, then show
+# in this zone. One instant, three wall times — the thing raw code always
+# fumbles.
+
+span = 2026-09-15 .. 2026-09-15          # a single day to search
+
+timezone = America/Los_Angeles
+sf  = every day 07:00 .. 22:00
+timezone = Europe/London
+ldn = every day 07:00 .. 22:00
+timezone = Asia/Kolkata
+blr = every day 07:00 .. 22:00
+
+# the hours all three are awake, on that day
+window = (sf & span) & (ldn & span) & (blr & span)
+
+show window in America/Los_Angeles       # → 07:00–09:30, breakfast in SF
+show window in Europe/London             # → 15:00–17:30, afternoon in London
+show window in Asia/Kolkata              # → 19:30–22:00, evening in Bangalore

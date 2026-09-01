@@ -147,6 +147,21 @@ test("a bare instant literal is a clock; a bare set is not", () => {
   assert.match(errs[0], /not an instant/);
 });
 
+test("a clock knows date-only from a time-of-day, through binding and arithmetic", () => {
+  const dateOnly = (line) => run(line).queries.find((q) => q.kind === "now").dateOnly;
+  // a bare date carries no hour; a datetime does
+  assert.equal(dateOnly("2027-02-06"), true);
+  assert.equal(dateOnly("2027-02-06 9:00"), false);
+  // a whole-day step keeps a date a date; sub-day units introduce a time
+  assert.equal(dateOnly("2026-08-10 + 180 days"), true);
+  assert.equal(dateOnly("2026-08-10 - 3 hours"), false);
+  // it rides through a binding
+  assert.equal(run("r = 2026-08-10 + 180 days\nr").queries.find((q) => q.kind === "now").dateOnly, true);
+  assert.equal(run("s = 2026-07-23 7:00\ns").queries.find((q) => q.kind === "now").dateOnly, false);
+  // now has a time-of-day — always a full clock
+  assert.equal(dateOnly("now"), false);
+});
+
 test("since: elapsed time, and a future target counts as not yet passed", () => {
   const out = run("since 2026-07-12 11:00\nsince 2026-07-12 13:00");
   assert.equal(out.queries[0].diffMs, Z.MS.hour);
@@ -296,6 +311,13 @@ test("a line ending in an operator continues on the next line", () => {
   assert.equal(out.bindings.a.members.length, 2);
 });
 
+test("a comment-only line inside a continuation is transparent, not a break", () => {
+  const out = run("a = 2026-01-01 .. 2026-01-02,\n    # 2026-01-03 .. 2026-01-04,\n    2026-01-05 .. 2026-01-06\ndays of a");
+  assert.deepEqual(out.errors, []);
+  assert.equal(out.bindings.a.members.length, 2);   // the commented interval is dropped, the line after it still joins
+  assert.equal(out.queries[0].days, 4);
+});
+
 test("rolling: series values, range, and the decay back to zero", () => {
   const out = run([
     "t1 = 2026-01-01 .. 2026-01-05",
@@ -353,6 +375,68 @@ test("rolling and last reject nonsense with hints", () => {
   assert.match(errorsOf("rolling days of stuff")[0], /full form/);
   assert.match(errorsOf("x = last 3 weeks")[0], /only days for now/);
   assert.match(errorsOf("last = 2026-01-01")[0], /reserved word/);
+});
+
+/* ------------------------------------------------- assert (v0.12) */
+
+const SCHENGEN = [
+  "trips = 2025-12-15 .. 2025-12-23,",
+  "        2026-03-27 .. 2026-05-11,",
+  "        2026-07-03 .. 2026-07-08,",
+  "        2026-07-17 .. 2026-08-10",
+].join("\n");
+
+test("assert: a rolling limit holds or fails, without breach", () => {
+  const ok = run(`${SCHENGEN}\nassert rolling days of trips in 180 days limit 90`).queries[0];
+  assert.equal(ok.kind, "assert");
+  assert.equal(ok.form, "rolling");
+  assert.equal(ok.ok, true);
+  assert.equal(ok.peak, 77);        // the four-trip set never crosses 90
+  // push the last trip long enough to breach, and the same assertion fails
+  const over = run(`${SCHENGEN.replace("2026-08-10", "2026-11-10")}\nassert rolling days of trips in 180 days limit 90`).queries[0];
+  assert.equal(over.ok, false);
+  assert.ok(over.peak > 90);
+});
+
+test("assert: a scalar comparison holds or fails on the number", () => {
+  const out = run(`${SCHENGEN}\nassert days of trips & last 180 days <= 90\nassert days of trips <= 50`);
+  assert.equal(out.queries[0].ok, true);    // 52 used so far <= 90
+  assert.equal(out.queries[0].lhs.value, 52);
+  assert.equal(out.queries[0].rhs.value, 90);
+  assert.equal(out.queries[1].ok, false);   // 86 total trip-days is not <= 50
+  assert.equal(out.queries[1].lhs.value, 86);
+});
+
+test("assert: measure-vs-measure and every operator", () => {
+  const cmp = (op, l, r) => run(`a = 2026-01-01 .. 2026-01-05\nb = 2026-01-01 .. 2026-01-11\nassert days of ${l} ${op} days of ${r}`).queries[0].ok;
+  assert.equal(cmp("<", "a", "b"), true);   // 5 < 11
+  assert.equal(cmp(">", "a", "b"), false);
+  assert.equal(cmp("=", "a", "a"), true);
+  assert.equal(cmp("!=", "a", "b"), true);
+  assert.equal(cmp(">=", "b", "a"), true);
+});
+
+test("assert: a failed assertion is not an error — the program still evaluates", () => {
+  const out = run(`${SCHENGEN.replace("2026-08-10", "2026-11-10")}\nassert rolling days of trips in 180 days limit 90`);
+  assert.deepEqual(out.errors, []);         // it's a false proposition, not a broken program
+  assert.equal(out.queries[0].ok, false);
+});
+
+test("assert: the proposition desugars to frozen literals, lens removed", () => {
+  const a = run(`timezone = Europe/Vienna\n${SCHENGEN}\nassert days of trips & last 180 days <= 90`);
+  const line = Z.desugar(a).split("\n").find((l) => l.startsWith("assert"));
+  assert.match(line, /assert days of trips & \d{4}-\d\d-\d\d/);   // `last 180 days` frozen to a UTC interval
+  assert.ok(!/last 180 days/.test(line));
+  // and the desugared assertion means the same thing
+  assert.equal(run(Z.desugar(a)).queries.find((q) => q.kind === "assert").ok, true);
+});
+
+test("assert: nonsense gets a pointed hint", () => {
+  assert.match(errorsOf("assert")[0], /assert what/);
+  assert.match(errorsOf("x = 2026-01-01 .. 2026-01-05\nassert x")[0], /wants a proposition/);
+  assert.match(errorsOf("x = 2026-01-01 .. 2026-01-05\nassert length of x <= 5")[0], /isn't a measure/);
+  assert.match(errorsOf("x = 2026-01-01 .. 2026-01-05\nassert rolling days of x in 180 days")[0], /needs a limit/);
+  assert.match(errorsOf("assert = 2026-01-01")[0], /measure/);
 });
 
 /* ------------------------------------------------- slots (v0.4) */
@@ -652,6 +736,147 @@ test("desugar survives depth filters and show", () => {
                    a.queries[0].members.map((m) => [m.start, m.end]));
 });
 
+/* -------------------------------------------- in <zone> (v0.13) */
+
+test("in <zone>: presentation only — the instant is unchanged, the display zone isn't", () => {
+  // one instant, read in Vienna, shown in Tokyo and in LA
+  const out = run("timezone = Europe/Vienna\nm = 2026-07-23 16:00\nm in Asia/Tokyo\nm in America/Los_Angeles");
+  const [tok, la] = out.queries;
+  assert.equal(tok.ms, la.ms);                 // same millisecond
+  assert.equal(tok.ms, Date.UTC(2026, 6, 23, 14));  // 16:00 Vienna = 14:00 UTC
+  assert.equal(tok.zone, "Asia/Tokyo");        // display zone overridden
+  assert.equal(la.zone, "America/Los_Angeles");
+  assert.equal(tok.lensZone, "Europe/Vienna"); // the lens it was read through
+  assert.equal(tok.label, "m");                // the zone is split off the label
+});
+
+test("in <zone>: show presents the same intervals in a chosen zone", () => {
+  const out = run("timezone = Europe/Vienna\nw = 2026-09-15 12:00 .. 2026-09-15 13:00\nshow w in Asia/Kolkata");
+  assert.equal(out.queries[0].zone, "Asia/Kolkata");
+  assert.equal(out.queries[0].members[0].start, Date.UTC(2026, 8, 15, 10));  // 12:00 Vienna = 10:00 UTC
+});
+
+test("in <zone>: the callable-hour overlap lands right in every zone", () => {
+  const src = [
+    "span = 2026-09-15 .. 2026-09-15",
+    "timezone = America/Los_Angeles", "sf = every day 07:00 .. 22:00",
+    "timezone = Europe/London", "ldn = every day 07:00 .. 22:00",
+    "timezone = Asia/Kolkata", "blr = every day 07:00 .. 22:00",
+    "window = (sf & span) & (ldn & span) & (blr & span)",
+    "show window in America/Los_Angeles",
+  ].join("\n");
+  const q = run(src, Date.UTC(2026, 8, 15, 12)).queries[0];
+  assert.equal(q.members.length, 1);
+  const f = Z.epochToCivil(q.members[0].start, "America/Los_Angeles");
+  assert.equal(f.h, 7);   // the window opens at 07:00 in LA
+});
+
+test("in <zone> is not confused by structural `in`, and rejects non-zones", () => {
+  // `alone in x` keeps its structural `in`; only a real zone tail is peeled
+  const a = run(CREDITS + "\nshow alone in credits");
+  const b = run(CREDITS + "\nshow alone in credits in Asia/Tokyo");
+  assert.deepEqual(a.queries[0].members.map((m) => [m.start, m.end]),
+                   b.queries[0].members.map((m) => [m.start, m.end]));   // same set…
+  assert.equal(a.queries[0].zone, "UTC");
+  assert.equal(b.queries[0].zone, "Asia/Tokyo");                          // …only the lens shifted
+  // a bogus zone tail is left as part of the operand, then fails to resolve
+  assert.match(errorsOf("show 2026-01-01 .. 2026-01-02 in Nowhere/Noplace")[0], /./);
+});
+
+test("in <zone>: desugar drops presentation — the lens truly dissolves", () => {
+  const a = run("timezone = Europe/Vienna\nw = 2026-09-15 12:00 .. 2026-09-15 13:00\nshow w in Asia/Kolkata");
+  const line = Z.desugar(a).split("\n").find((l) => l.startsWith("show"));
+  assert.ok(!/in Asia\/Kolkata/.test(line));           // presentation zone gone
+  assert.deepEqual(run(Z.desugar(a)).queries[0].members.map((m) => [m.start, m.end]),
+                   a.queries[0].members.map((m) => [m.start, m.end]));   // identical instants
+});
+
+/* --------------------------------------------- as of (v0.14) */
+
+test("as of <instant>: reads a now-relative line at a hypothetical present", () => {
+  const src = "timezone = UTC\ntrips = 2026-01-01 .. 2026-01-10\n" +
+              "days of trips & last 180 days as of 2026-03-01\n" +   // Jan still in the window
+              "days of trips & last 180 days as of 2026-12-01";      // Jan aged out
+  const out = run(src);
+  assert.equal(out.queries[0].days, 10);
+  assert.equal(out.queries[1].days, 0);
+  assert.equal(out.queries[0].asOf, Date.UTC(2026, 2, 1));
+});
+
+test("as of: `now` itself moves to the hypothetical present", () => {
+  const out = run("now as of 2027-02-09 10:00");
+  assert.equal(out.queries[0].kind, "now");
+  assert.equal(out.queries[0].ms, Date.UTC(2027, 1, 9, 10));
+  assert.equal(out.queries[0].asOf, Date.UTC(2027, 1, 9, 10));
+});
+
+test("as of: the operand is resolved with the REAL now, then becomes now", () => {
+  const out = run("now as of now + 3 days");   // `now` inside as-of is baseNow
+  assert.equal(out.queries[0].ms, NOW + 3 * Z.MS.day);
+});
+
+test("as of: purity — desugar freezes the hypothetical window; any re-run agrees", () => {
+  const a = run("timezone = UTC\ntrips = 2026-01-01 .. 2026-01-10\ndays of trips & last 180 days as of 2026-03-01");
+  assert.equal(a.queries[0].days, 10);
+  const re = run(Z.desugar(a), NOW + 5000 * Z.MS.day);   // an absurdly different present
+  assert.equal(re.queries[0].days, 10);                  // the frozen window didn't budge
+});
+
+test("as of: a malformed present is an error", () => {
+  assert.match(errorsOf("days of 2026-01-01 .. 2026-01-05 as of nope")[0], /not bound|instant/);
+});
+
+/* --------------------------------------------- calendar (v0.16) */
+
+test("calendar: bare is the current month; with an instant it's that month", () => {
+  const out = run("calendar\ncalendar 2026-11-13");
+  assert.equal(out.queries[0].kind, "calendar");
+  assert.equal(out.queries[0].ms, NOW);            // bare = now
+  assert.equal(out.queries[0].label, "now");
+  assert.equal(out.queries[1].ms, Date.UTC(2026, 10, 13));
+  assert.equal(out.queries[1].label, "2026-11-13");
+});
+
+test("calendar: composes with the lens, in <zone>, and as of", () => {
+  const inz = run("timezone = Europe/Vienna\ncalendar in Asia/Tokyo").queries[0];
+  assert.equal(inz.zone, "Asia/Tokyo");            // presentation zone overridden
+  assert.equal(inz.ms, NOW);                       // still now
+  const ao = run("calendar as of 2026-11-01").queries[0];
+  assert.equal(ao.ms, Date.UTC(2026, 10, 1));      // the month time-travels
+  assert.equal(ao.asOf, Date.UTC(2026, 10, 1));
+});
+
+test("calendar: desugars to a frozen instant, like a clock", () => {
+  const a = run("timezone = Europe/Vienna\ncalendar 2026-11-13");
+  assert.match(Z.desugar(a), /calendar 2026-11-12 23:00/);   // 00:00 Vienna = prev-day 23:00 UTC
+  assert.equal(run(Z.desugar(a)).queries[0].ms, a.queries[0].ms);   // identical instant
+});
+
+test("calendar of a stretch carries its members to span months and shade days", () => {
+  const out = run("timezone = Europe/Vienna\ntrips = 2026-07-03 .. 2026-07-08, 2026-11-01 .. 2026-11-13\ncalendar trips");
+  const q = out.queries[0];
+  assert.equal(q.kind, "calendar");
+  assert.equal(q.members.length, 2);          // the set travels to the card, which spans Jul…Nov
+  assert.equal(q.ms, NOW);                     // today is still the marked day
+  // last 180 days is a set too — the whole Schengen window, one calendar
+  const w = run("calendar last 180 days").queries[0];
+  assert.equal(w.members.length, 1);
+  // a duration or a rule is not a stretch to lay out
+  assert.match(errorsOf("calendar 3 days")[0], /duration/);
+  assert.match(errorsOf("h = every monday\ncalendar h")[0], /recurrence/);
+});
+
+test("calendar of a stretch desugars to its frozen set, not an instant", () => {
+  const a = run("timezone = Europe/Vienna\ntrips = 2026-11-01 .. 2026-11-13\ncalendar trips");
+  const line = Z.desugar(a).split("\n").find((l) => l.startsWith("calendar"));
+  assert.equal(line.replace(/\s+#.*/, "").trim(), "calendar trips");   // the set reference survives
+  assert.equal(run(Z.desugar(a)).queries[0].members.length, 1);
+});
+
+test("calendar is a reserved word", () => {
+  assert.match(errorsOf("calendar = 2026-01-01")[0], /reserved word/);
+});
+
 /* --------------------------------------------- durations (v0.8) */
 
 test("instant - hours: absolute arithmetic, straight through the lens", () => {
@@ -862,8 +1087,25 @@ test("desugar survives intervals: through-dates resolved, extents identical", ()
                    a.bindings.credits.members.map((m) => [m.start, m.end, m.labels]));
   const seg = (o) => o.queries[0].segments.map((s) => [s.start, s.end, s.covers.join("+")]);
   assert.deepEqual(seg(b), seg(a));
-  // day counts differ by lens (Vienna vs UTC) by design; extents may not.
-  assert.equal(b.queries[2].breakdown.ms, a.queries[2].breakdown.ms);
+  assert.equal(b.queries[2].breakdown.ms, a.queries[2].breakdown.ms);   // length is absolute
+  assert.equal(b.queries[1].days, a.queries[1].days);                    // …and the civil count survives too
+});
+
+test("desugar keeps a civil-day count under its lens — the count does not drift", () => {
+  // this interval straddles the UTC/Vienna offset: 13 civil days in Vienna,
+  // but 14 if the lens were naively dropped to UTC. The UTC view must re-aim
+  // the lens (like a rule), not remove it.
+  const a = run("timezone = Europe/Vienna\ntrips = 2026-11-01 .. 2026-11-13\ndays of trips");
+  assert.equal(a.queries[0].days, 13);
+  const de = Z.desugar(a);
+  assert.match(de, /timezone = Europe\/Vienna/);          // the lens is re-aimed, not dropped
+  assert.equal(run(de).queries[0].days, 13);              // …so the count holds
+  // rolling is the same civil-count shape
+  const r = run("timezone = Europe/Vienna\ntrips = 2026-11-01 .. 2026-11-13\nrolling days of trips in 180 days limit 90");
+  assert.equal(run(Z.desugar(r)).queries[0].max, r.queries[0].max);
+  // length, being absolute, reduces cleanly to UTC — no lens re-aim at all
+  const L = run("timezone = Europe/Vienna\ntrips = 2026-11-01 .. 2026-11-13\nlength of trips");
+  assert.ok(!/^timezone = Europe\/Vienna/m.test(Z.desugar(L)));   // only the top `timezone = UTC` survives
 });
 
 /* ------------------------------------------------- examples as fixtures */

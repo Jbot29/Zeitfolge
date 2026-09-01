@@ -1,0 +1,18 @@
+# Time-travel, for free. The whole program is a pure function of `now`, so
+# `as of <instant>` just runs a line at a different present. "How many
+# Schengen days will I have used the day I land — and the day I leave?"
+# is one keyword, not a spreadsheet.
+
+hamburg = 2027-02-09
+timezone = Europe/Vienna
+
+trips = 2025-12-15 .. 2025-12-23,
+        2026-03-27 .. 2026-05-11,
+        2026-07-03 .. 2026-07-08,
+        2026-07-17 .. 2026-08-10,
+        2026-11-01 .. 2026-11-13,
+        hamburg .. 2027-05-01
+
+days of trips & last 180 days                    # used today
+days of trips & last 180 days as of hamburg      # used the day I land
+days of trips & last 180 days as of 2027-05-01   # used the day I leave — over 90

@@ -1,4 +1,4 @@
-# Zeitfolge — language spec v0.11
+# Zeitfolge — language spec v0.17
 
 A small, code-first language for working with time — asking questions about
 it, and doing algebra on stretches of it. The same source is the data, the
@@ -28,7 +28,10 @@ instant; every answer is shown back through it. The lens is presentation
 and interpretation — it is never part of the data. The playground's **UTC
 view** proves this: it re-emits any program with the lens removed (every
 civil literal rewritten to its UTC wall time), and the result is valid
-source resolving to identical instants and extents.
+source resolving to identical instants and extents. The two things the lens
+*genuinely* owns — a recurrence rule and a civil-day count (`days of`,
+`rolling`) — it cannot give up, so the UTC view keeps their lens named
+around them rather than dropping it. Everything else reduces to UTC.
 
 The timezone database is the one piece of machinery we refuse to hand-roll:
 `Intl` ships the full IANA database in every JS engine, so `zeitfolge.js`
@@ -46,7 +49,18 @@ v0.9 by embedding again — "the overlap should say which blocks it came
 from, so the caller can join the answer back to its own data"; v0.10 by
 the remote worker's wall — "what time is it, right now, for everyone?";
 v0.11 by the same wall turned around — "someone sent a meeting in their
-zone; what time is that for me?"
+zone; what time is that for me?"; v0.12 by verification — "let the plan
+state its own limit and check itself: a `.zf` a CI job can fail on";
+v0.13 by the distributed team — "when can three cities all take a call,
+and what's that in each of their wall clocks?"; v0.14 by the forecast —
+"how many Schengen days will I have used the day I land, and the day I
+leave?" — run a line at a hypothetical present; v0.15 by honesty — the UTC
+view was quietly miscounting `days of` across the offset, so a civil-day
+count is now treated as irreducibly civil (its lens is re-aimed, not
+removed), exactly like a recurrence rule; v0.16 by the planner who kept
+leaving for a calendar app — `calendar` is `now` zoomed out to a month;
+v0.17 because the Schengen window alone is 180 days — `calendar` of a
+stretch spans every month it touches, days shaded.
 
 ## Try it live
 
@@ -75,6 +89,7 @@ timezone = <IANA zone>        aim the lens (default: UTC)
                               define a recurrence (its own statement form)
 <instant>                     a bare instant on a line — read it as a clock
 now                           the clock whose instant is the present
+calendar [<instant>|<set>]    month card(s) — a month, or every month a set spans
 until <instant>               how long from now until it?
 since <instant>               how long from it until now?
 days of <intervals>           civil days touched, through the lens
@@ -85,6 +100,10 @@ rolling days of <intervals> in <n> days [limit <m>]
 slots of <intervals> every <n> minutes|hours
                               chop coverage into offerable pieces
 show <intervals>              the interrogation verb: is it there, and where?
+assert <proposition>          the verification verb: does the plan hold?
+show <intervals> in <zone>    read as usual, but show in this zone
+<instant> in <zone>           a clock, shown in a borrowed zone
+<query> as of <instant>       run this line at a hypothetical present
 ```
 
 A line ending in an operator (`,` `&` `|` `-` `..`) **continues on the
@@ -136,6 +155,93 @@ Only instants become clocks. A set has width (`show`, `days of`, `length
 of` are its verbs); a duration has no position (anchor it to an instant);
 a recurrence is unbounded (bound it) — each is refused with a pointer to
 the verb that fits.
+
+## A month at a glance — `calendar`
+
+`calendar` is the clock zoomed out one level: a month card instead of a
+time. Bare, it's the **current** month through the lens, today marked —
+somewhere to orient while planning without leaving for a calendar app.
+Given an instant, it's *that* month, with that day marked:
+
+```
+calendar                # this month, today marked
+calendar 2026-11-13     # November, the 13th marked — what weekday, what neighbours?
+```
+
+Given a **stretch** (any set), it spans *every month the set touches* and
+**shades the days in it**, with today still marked. One card holds the
+whole Schengen window — 180 days is about six months — with your trips lit
+up across it:
+
+```
+calendar trips             # every month a trip touches, trip days shaded
+calendar last 180 days     # the whole rolling window, one card
+```
+
+Like the clock it's a pure display, so it composes with the lens, with `in
+<zone>` (`calendar in Asia/Tokyo`), and with `as of` (`calendar as of
+2027-02-01`). In the UTC view a month-of-an-instant freezes to that instant
+and a span freezes to its resolved set, exactly as a clock does. (The
+rendered span is capped at 36 months.)
+
+## Reading in another zone — `in <zone>`
+
+The lens does two jobs: it **interprets** civil literals into instants, and
+it **presents** instants back as civil time. `timezone =` sets both for the
+lines below it. A trailing **`in <zone>`** overrides just the second — read
+as usual, then show *this* answer in *that* zone — without disturbing the
+lens for anything else:
+
+```
+meeting in Asia/Tokyo          # the clock, shown in Tokyo
+show window in Europe/London   # the same intervals, London's wall time
+```
+
+It's how one instant is read three ways at once. When can a distributed
+team all take a call?
+
+```
+span = 2026-09-15 .. 2026-09-15
+
+timezone = America/Los_Angeles
+sf  = every day 07:00 .. 22:00
+timezone = Europe/London
+ldn = every day 07:00 .. 22:00
+timezone = Asia/Kolkata
+blr = every day 07:00 .. 22:00
+
+window = (sf & span) & (ldn & span) & (blr & span)
+show window in America/Los_Angeles   # → 07:00–09:30
+show window in Europe/London         # → 15:00–17:30
+show window in Asia/Kolkata          # → 19:30–22:00
+```
+
+`in` is presentation only: to *interpret* a literal in another zone, aim
+the lens. Because it changes nothing about the instants, the UTC view drops
+it — the three `show`s above collapse to one identical line, proof they
+were the same stretch all along. (`in` is disambiguated from the structural
+`in` of `alone in x` or `rolling … in 180 days` by requiring a real IANA
+zone after it.)
+
+## Time travel — `as of <instant>`
+
+A Zeitfolge program is a pure function of `(source, now)`. A trailing **`as
+of <instant>`** exploits that directly: it runs one line with `now` set to
+a hypothetical present. Everything now-relative on that line — `last N
+days`, `now`, `until`/`since`, `next` — moves together, with no per-verb
+machinery:
+
+```
+days of trips & last 180 days                    # used today
+days of trips & last 180 days as of 2027-02-09   # what I'll owe the day I land
+days of trips & last 180 days as of 2027-05-01   # …and the day I leave
+```
+
+The instant is resolved with the *real* now first (so `as of now + 3 days`
+means three days from today), then becomes `now` for the rest of the line.
+The resolved window is frozen into the desugared program, so the UTC view of
+an `as of` line is fixed forever — the answer to a *hypothetical* is itself
+a fixed fact. (Order: any `in <zone>` comes before `as of`.)
 
 ## Values
 
@@ -310,6 +416,44 @@ rolling days of trips in 180 days limit 90
 Windows are counted in **civil days through the lens** — a window that
 straddles a DST change is still exactly n calendar days. The series is
 capped at 2000 points (with a warning) to keep the playground honest.
+
+## Verification — `assert`
+
+A program can state what must hold and check itself. An assertion is pure
+intent written in the same vocabulary as the rest of the script — there is
+no separate implementation to get wrong, so a failure means the **plan** is
+wrong, not the tool. That is the point: it collapses the old "is the DSL
+broken or is my program broken?" question, because the assertion *is* the
+program's intent, checkable independently of the engine.
+
+Two shapes:
+
+```
+assert rolling days of trips in 180 days limit 90   # the limit is never breached
+assert days of trips & last 180 days <= 90          # a measure vs a bound
+assert days of a <= days of b                        # a measure vs a measure
+```
+
+- The **rolling** shorthand reuses the `limit` already in the syntax: it
+  holds iff no day's window exceeds it. A failure reports the peak, the day
+  it lands on, and by how much it's over.
+- The **comparison** form relates two measures. A measure is `days of
+  <intervals>` (a civil-day count) or a plain number. The operators are
+  `<=`, `>=`, `<`, `>`, `=` (or `==`), and `!=`.
+
+A failed assertion is **not an error** — it is a false proposition, a
+perfectly valid program with `ok: false` on its query. This is deliberate:
+a host embedding the engine gates on it directly —
+
+```js
+const { queries } = evaluate(src, { now: Date.now() });
+if (queries.some(q => q.kind === "assert" && !q.ok)) process.exit(1);
+```
+
+— so a `.zf` file becomes a runnable spec: the same file documents the
+constraint *and* enforces it. Assertions desugar like everything else, with
+their literals frozen to UTC — the UTC view shows `last 180 days` resolved
+to an explicit interval, proof the check means the same thing tomorrow.
 
 ## slots
 

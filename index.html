@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Zeitfolge — time you can read (v0.9)</title>
+<title>Zeitfolge — time you can read (v0.17)</title>
 <style>
   /* Same family as Schauplatz/Klangbild: paper, ink, mono. Zeitfolge's
      accents: indigo (now / the timeline) and copper (the target).
@@ -47,10 +47,6 @@
   #datain:focus { outline:none; border-color:var(--indigo); }
   #datain:placeholder-shown { border-style:dashed; }
 
-  /* the UTC view — the program with the lens removed */
-  #utcview { flex:none; max-height:28%; overflow:auto; background:var(--paper-deep);
-    border:2px dashed var(--indigo); font-size:11px; line-height:1.55; padding:10px 12px; white-space:pre; }
-
   .controls { display:flex; gap:8px; align-items:center; flex:none; flex-wrap:wrap; }
   button, select { font-family:var(--mono); font-size:12px; padding:7px 12px; cursor:pointer;
     background:var(--ink); color:var(--paper); border:2px solid var(--ink); box-shadow:2px 2px 0 rgba(37,42,56,0.2); }
@@ -83,12 +79,25 @@
   .chip:hover { background:var(--indigo); color:var(--paper); }
   .more { font-family:var(--serif); font-style:italic; font-size:12px; color:var(--ink-soft); align-self:center; }
   .empty { font-family:var(--serif); font-style:italic; color:var(--ink-soft); font-size:14px; padding:20px 4px; }
+  .calmonths { display:flex; flex-wrap:wrap; gap:10px 18px; margin-top:6px; }
+  .calmon { flex:none; }
+  .calhead { font-size:14px; font-weight:500; color:var(--indigo); letter-spacing:0.03em; margin:2px 0 5px; }
+  .calgrid { display:grid; grid-template-columns:repeat(7,1fr); gap:3px; width:210px; }
+  .calgrid .hd { font-size:9px; letter-spacing:0.06em; text-transform:uppercase; color:var(--ink-soft);
+    text-align:center; padding-bottom:2px; }
+  .calgrid .d { text-align:center; padding:5px 0; font-size:12px; font-variant-numeric:tabular-nums;
+    border:1.5px solid transparent; border-radius:2px; }
+  .calgrid .d.wknd { color:var(--ink-soft); }
+  .calgrid .d.mark { border-color:var(--indigo); color:var(--indigo); font-weight:600;
+    background:rgba(61,79,158,0.08); }
+  .calgrid .d.on { background:var(--indigo); color:var(--paper); border-color:var(--indigo); }
+  .calgrid .d.on.mark { border-color:var(--copper); border-width:2px; color:var(--paper); }  /* today, and a marked day */
 </style>
 </head>
 <body>
   <header>
     <h1><span class="fig">Zeitfolge</span> time you can read</h1>
-    <div class="sub">v0.9 — the lens · intervals · the algebra · rolling · slots · load · recurrence · alone / shared · durations · provenance</div>
+    <div class="sub">v0.17 — the lens · intervals · the algebra · rolling · slots · load · recurrence · alone / shared · durations · provenance · clocks · calendar · assert · in &lt;zone&gt; · as of</div>
   </header>
 
   <div class="workspace">
@@ -97,8 +106,6 @@
       <textarea id="editor" spellcheck="false"></textarea>
       <div class="panel-label"><span>Data (JSON)</span><span class="hint">what a host passes to evaluate(src, {data}) — read with load "…"</span></div>
       <textarea id="datain" spellcheck="false" placeholder='{ "blocks": [["2026-07-20 12:00", "2026-07-20 15:00"]] }'></textarea>
-      <div class="panel-label"><span>UTC view</span><span class="hint">the same program, lens removed — still valid source</span></div>
-      <pre id="utcview"></pre>
       <div class="controls">
         <select id="examples"></select>
         <button id="open" class="ghost" title="load a .zf file from disk">open…</button>
@@ -230,9 +237,9 @@ until in_amsterdam
 `,
   "timezone helper": `# One meeting, three wall clocks — the remote worker's daily question.
 # The lens is presentation: re-aim it and ask again. Each answer shows
-# the SAME instant through a different zone, with a live countdown, and
-# the UTC view proves there is only one fact underneath. Move the
-# meeting once; every clock slides together.
+# the SAME instant through a different zone, with a live countdown —
+# there is only one fact underneath. Move the meeting once; every clock
+# slides together.
 
 timezone = Europe/Vienna
 standup = 2026-07-14 17:00
@@ -244,11 +251,25 @@ until standup                    # 11:00 in New York
 timezone = Asia/Tokyo
 until standup                    # 00:00 in Tokyo — maybe move the meeting
 `,
+  "planner's desk": `# Orient while you plan — no jumping to a calendar app. \`calendar\` is
+# \`now\` zoomed out. Bare or given a date: one month, that day marked.
+# Given a STRETCH: every month it spans, its days shaded — so the whole
+# Schengen window (180 days ≈ 6 months) fits on one card, trips lit up.
+
+timezone = Europe/Vienna
+
+trips = 2026-07-03 .. 2026-07-08,
+        2026-11-01 .. 2026-11-13
+
+calendar                         # this month, today marked
+calendar trips                   # every month my trips touch, days shaded
+calendar last 180 days           # the whole Schengen window, one card
+`,
   "world clock": `# The remote worker's wall: what time is it, right now, for everyone?
 # \`now\` is \`until\` with the target dropped — what's left is a clock,
 # read through whatever lens is in force. Stack the zones you live
-# across and the page IS a world clock; each ticks live. The UTC view
-# collapses them all to one \`now\` — proof it was always one instant.
+# across and the page IS a world clock; each ticks live — all of them one
+# and the same instant, only differently presented.
 
 timezone = Europe/Vienna
 now                              # home
@@ -278,6 +299,62 @@ timezone = Europe/Vienna
 standup                           # → 16:00 for me
 review                           # → 11:00 for me, still the 24th here
 `,
+  "the callable hour": `# Three teammates, three continents. When can all three take a call
+# without anyone up at midnight? Define each person's waking hours in
+# THEIR zone, intersect, then read the answer in each zone with \`in\`.
+# One instant, three wall times — the thing raw code always fumbles.
+
+span = 2026-09-15 .. 2026-09-15          # a single day to search
+
+timezone = America/Los_Angeles
+sf  = every day 07:00 .. 22:00
+timezone = Europe/London
+ldn = every day 07:00 .. 22:00
+timezone = Asia/Kolkata
+blr = every day 07:00 .. 22:00
+
+window = (sf & span) & (ldn & span) & (blr & span)
+
+show window in America/Los_Angeles       # → 07:00–09:30, breakfast in SF
+show window in Europe/London             # → 15:00–17:30, afternoon in London
+show window in Asia/Kolkata              # → 19:30–22:00, evening in Bangalore
+`,
+  "as of — time travel": `# The whole program is a pure function of \`now\`, so \`as of <instant>\`
+# just runs a line at a different present. "How many Schengen days will I
+# have used the day I land — and the day I leave?" is one keyword.
+
+hamburg = 2027-02-09
+timezone = Europe/Vienna
+
+trips = 2025-12-15 .. 2025-12-23,
+        2026-03-27 .. 2026-05-11,
+        2026-07-03 .. 2026-07-08,
+        2026-07-17 .. 2026-08-10,
+        2026-11-01 .. 2026-11-13,
+        hamburg .. 2027-05-01
+
+days of trips & last 180 days                    # used today
+days of trips & last 180 days as of hamburg      # the day I land
+days of trips & last 180 days as of 2027-05-01   # the day I leave — over 90
+`,
+  "assert: a plan that checks itself": `# A program can state what must hold and check itself. An assertion is
+# pure intent in the shared vocabulary — so when it fails, you know it's
+# the PLAN that's wrong, not the tool. Drop a trip's end date to watch
+# "holds" flip to "fails". This is a .zf you could gate a CI job on.
+
+timezone = Europe/Vienna
+
+trips = 2025-12-15 .. 2025-12-23,
+        2026-03-27 .. 2026-05-11,
+        2026-07-03 .. 2026-07-08,
+        2026-07-17 .. 2026-08-10,
+        2026-11-01 .. 2026-11-13,
+        2027-02-09 .. 2027-05-01
+
+# the cap so far, and the cap across the whole plan
+assert days of trips & last 180 days <= 90        # holds — 77 used today
+assert rolling days of trips in 180 days limit 90  # fails — peaks at 93
+`,
   "two zones, one timeline": `# The lens re-aims mid-program: each half reads and shows civil time in
 # its own zone, but underneath everything is one UTC timeline — which is
 # how one program will eventually hold two people's calendars.
@@ -303,7 +380,6 @@ const EXAMPLE_DATA = {
 
 const editor = document.getElementById("editor");
 const datain = document.getElementById("datain");
-const utcview = document.getElementById("utcview");
 const status = document.getElementById("status");
 const cards = document.getElementById("cards");
 const examplesSel = document.getElementById("examples");
@@ -380,8 +456,6 @@ function render(rebuild) {
     status.classList.toggle("err", !!w);
   }
 
-  utcview.textContent = Z.desugar(out);
-
   const sig = out.queries.map((q) => q.kind + (q.members ? q.members.length : "")).join("|");
   if (rebuild || sig !== cardSig) {
     cardSig = sig;
@@ -389,7 +463,7 @@ function render(rebuild) {
     if (!out.queries.length) {
       const d = document.createElement("div");
       d.className = "empty";
-      d.textContent = "No questions yet — ask with `now`, `until`, `since`, `days of`, `length of`, `partition`, `rolling days of`, or `slots of`.";
+      d.textContent = "No questions yet — ask with `now`, `calendar`, `until`, `since`, `days of`, `length of`, `partition`, `rolling days of`, `slots of`, `show`, or `assert`.";
       cards.appendChild(d);
     }
     for (const q of out.queries) cards.appendChild(buildCard(q));
@@ -406,8 +480,17 @@ function buildCard(q) {
     c.innerHTML = `<div class="cap"><span><b></b></span><span class="tz"></span></div>
       <div class="when"></div><div class="big"></div><div class="verdict"></div><canvas height="56"></canvas>`;
   } else if (q.kind === "now") {
-    c.innerHTML = `<div class="cap"><span><b></b></span><span class="tz"></span></div>
+    c.innerHTML = q.dateOnly
+      ? `<div class="cap"><span><b></b></span><span class="tz"></span></div>
+      <div class="big"></div>`   // a bare date — no hour to show, no day-bar to fill
+      : `<div class="cap"><span><b></b></span><span class="tz"></span></div>
       <div class="when"></div><div class="big"></div><canvas height="26"></canvas>`;
+  } else if (q.kind === "calendar") {
+    c.innerHTML = `<div class="cap"><span><b></b></span><span class="tz"></span></div>
+      <div class="calmonths"></div>`;
+  } else if (q.kind === "assert") {
+    c.innerHTML = `<div class="cap"><span><b></b></span><span class="tz"></span></div>
+      <div class="big"></div><div class="verdict"></div>`;
   } else if (q.kind === "partition") {
     c.innerHTML = `<div class="cap"><span><b></b></span><span class="tz"></span></div>
       <canvas></canvas><div class="segtable"></div>`;
@@ -428,9 +511,15 @@ function buildCard(q) {
 }
 
 function updateCard(c, q, now) {
-  c.querySelector(".tz").textContent = q.zone;
+  // the display zone, and — when the line time-travelled — the present it read at
+  const p2 = (n) => String(n).padStart(2, "0");
+  let tz = q.zone;
+  if (q.asOf != null) { const f = Z.epochToCivil(q.asOf, q.zone); tz += `  ·  as of ${f.y}-${p2(f.mo)}-${p2(f.d)}`; }
+  c.querySelector(".tz").textContent = tz;
   if (q.kind === "until" || q.kind === "since") updateCountdown(c, q, now);
-  else if (q.kind === "now") updateNow(c, q, now);
+  else if (q.kind === "now") q.dateOnly ? updateDate(c, q) : updateNow(c, q, now);
+  else if (q.kind === "calendar") updateCalendar(c, q);
+  else if (q.kind === "assert") updateAssert(c, q);
   else if (q.kind === "partition") updatePartition(c, q);
   else if (q.kind === "rolling") updateRolling(c, q, now);
   else if (q.kind === "slots") updateSlots(c, q);
@@ -599,6 +688,95 @@ function updateNow(c, q, now) {
   c.querySelector(".big").innerHTML =
     `<span class="seg"><span class="n">${p2(f.h)}:${p2(f.mi)}:${p2(f.s)}</span><span class="u">${off}</span></span>`;
   drawDayBar(c.querySelector("canvas"), f);
+}
+
+// a date-only clock — the value carries no time-of-day, so the card leads
+// with the date and names the weekday under it. No HH:MM:SS, no day-bar.
+function updateDate(c, q) {
+  const p2 = (n) => String(n).padStart(2, "0");
+  const f = Z.epochToCivil(q.ms, q.zone);
+  const wd = new Intl.DateTimeFormat("en-US", { timeZone: q.zone, weekday: "long" }).format(q.ms);
+  c.querySelector("b").textContent = q.label || "date";
+  c.querySelector(".big").innerHTML =
+    `<span class="seg"><span class="n">${f.y}-${p2(f.mo)}-${p2(f.d)}</span><span class="u">${wd}</span></span>`;
+}
+
+// assert — a proposition the program checks about itself. Green when it
+// holds, copper when it fails, with the actual numbers spelled out so a
+// failure explains itself (peak 93 on this day, over the limit by 3).
+function updateAssert(c, q) {
+  const p2 = (n) => String(n).padStart(2, "0");
+  c.querySelector("b").textContent = "assert";
+  const ok = q.ok;
+  c.querySelector(".big").innerHTML =
+    `<span class="seg"><span class="n" style="color:var(${ok ? "--moss" : "--copper"})">${ok ? "holds" : "fails"}</span></span>`;
+  let detail;
+  if (q.form === "rolling") {
+    if (ok) detail = `peak ${q.peak}, within the ${q.limit}-day limit`;
+    else {
+      const f = Z.epochToCivil(q.peakMs, q.zone);
+      detail = `peak ${q.peak} on ${f.y}-${p2(f.mo)}-${p2(f.d)} — over the ${q.limit}-day limit by ${q.peak - q.limit}`;
+    }
+  } else {
+    const side = (s) => s.kind === "num" ? `${s.value}` : `days of ${s.expr} (${s.value})`;
+    detail = `${side(q.lhs)} ${q.op} ${side(q.rhs)}`;
+  }
+  c.querySelector(".verdict").textContent = `${q.claim} → ${detail}`;
+}
+
+// calendar — `now` zoomed out. A place to orient while planning without
+// leaving for the calendar app. Bare or an instant → one month, that day
+// marked. A stretch → every month it spans, its days shaded, today still
+// marked. Monday-start (the European week); weekends dimmed. Capped so a
+// runaway span can't paint thousands of months.
+const CAL_MONTHS_CAP = 36;
+function updateCalendar(c, q) {
+  const markF = Z.epochToCivil(q.ms, q.zone);
+  const members = q.members || [];
+  c.querySelector("b").textContent = q.label || "now";
+
+  // which months to render
+  let months = [];
+  if (members.length) {
+    const s = Z.epochToCivil(members[0].start, q.zone);
+    const e = Z.epochToCivil(members[members.length - 1].end - 1, q.zone);
+    let y = s.y, mo = s.mo;
+    while (months.length < CAL_MONTHS_CAP) {
+      months.push({ y, mo });
+      if (y === e.y && mo === e.mo) break;
+      if (++mo > 12) { mo = 1; y++; }
+    }
+  } else months = [{ y: markF.y, mo: markF.mo }];
+
+  // is this civil day touched by any member? (compare against the day's real
+  // wall bounds in the lens, so DST-length days are handled)
+  const shaded = (y, mo, d) => {
+    if (!members.length) return false;
+    const start = Z.civilToEpoch({ y, mo, d, h: 0, mi: 0, s: 0 }, q.zone);
+    const nx = new Date(Date.UTC(y, mo - 1, d + 1));
+    const end = Z.civilToEpoch({ y: nx.getUTCFullYear(), mo: nx.getUTCMonth() + 1, d: nx.getUTCDate(), h: 0, mi: 0, s: 0 }, q.zone);
+    return members.some((m) => m.start < end && m.end > start);
+  };
+
+  const monthName = (y, mo) => new Intl.DateTimeFormat("en-US", { timeZone: "UTC", month: "long" }).format(Date.UTC(y, mo - 1, 1, 12));
+  const block = ({ y, mo }) => {
+    const daysInMonth = new Date(Date.UTC(y, mo, 0)).getUTCDate();
+    const firstDow = (new Date(Date.UTC(y, mo - 1, 1)).getUTCDay() + 6) % 7;   // Monday = 0
+    const cells = ["Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"].map((h) => `<div class="hd">${h}</div>`);
+    for (let i = 0; i < firstDow; i++) cells.push(`<div class="d"></div>`);
+    for (let d = 1; d <= daysInMonth; d++) {
+      const dow = (firstDow + d - 1) % 7;
+      const isMark = y === markF.y && mo === markF.mo && d === markF.d;
+      const cls = "d" + (shaded(y, mo, d) ? " on" : "") + (isMark ? " mark" : "") + (dow >= 5 ? " wknd" : "");
+      cells.push(`<div class="${cls}">${d}</div>`);
+    }
+    return `<div class="calmon"><div class="calhead">${monthName(y, mo)} ${y}</div><div class="calgrid">${cells.join("")}</div></div>`;
+  };
+
+  let html = months.map(block).join("");
+  if (members.length && months.length >= CAL_MONTHS_CAP)
+    html += `<div class="more">span capped at ${CAL_MONTHS_CAP} months</div>`;
+  c.querySelector(".calmonths").innerHTML = html;
 }
 
 // a thin midnight→midnight bar with a marker at the current time — so a
