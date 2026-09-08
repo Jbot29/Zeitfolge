@@ -1,0 +1,14 @@
+# "Is this moment inside that window?" — the question behind deploy
+# freezes, quiet hours, store hours, market hours. `assert <instant> in
+# <stretch>` (or `not in`) makes it a proposition the plan checks. The
+# stretch can be a recurrence: it's materialized just around the moment.
+
+timezone = America/New_York
+
+hours   = every weekday 09:00 .. 17:00       # when we ship
+holiday = 2026-11-26 .. 2026-11-27           # Thanksgiving — nobody's around
+deploy  = 2026-11-26 14:00                   # the proposed release
+
+assert deploy in hours                       # a weekday afternoon — holds…
+assert deploy not in holiday                 # …but it's Thanksgiving — FAILS
+assert now in hours                          # can I ship right now?

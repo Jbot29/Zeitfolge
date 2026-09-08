@@ -1,4 +1,4 @@
-# Zeitfolge — language spec v0.17
+# Zeitfolge — language spec v0.19
 
 A small, code-first language for working with time — asking questions about
 it, and doing algebra on stretches of it. The same source is the data, the
@@ -60,7 +60,12 @@ count is now treated as irreducibly civil (its lens is re-aimed, not
 removed), exactly like a recurrence rule; v0.16 by the planner who kept
 leaving for a calendar app — `calendar` is `now` zoomed out to a month;
 v0.17 because the Schengen window alone is 180 days — `calendar` of a
-stretch spans every month it touches, days shaded.
+stretch spans every month it touches, days shaded; v0.18 by the release
+manager — "is this moment inside the freeze?" — `assert <instant> in
+<stretch>`, membership as a proposition; v0.19 by every invoice, SLA and
+shipping estimate ever written — "due in 8 business hours", "ships in 3
+business days" — `business =` declares the working calendar the way
+`timezone =` declares the lens.
 
 ## Try it live
 
@@ -104,6 +109,8 @@ assert <proposition>          the verification verb: does the plan hold?
 show <intervals> in <zone>    read as usual, but show in this zone
 <instant> in <zone>           a clock, shown in a borrowed zone
 <query> as of <instant>       run this line at a hypothetical present
+business = every <days> [HH:MM .. HH:MM] [- <set>]
+                              the working calendar for the lines below
 ```
 
 A line ending in an operator (`,` `&` `|` `-` `..`) **continues on the
@@ -426,12 +433,14 @@ wrong, not the tool. That is the point: it collapses the old "is the DSL
 broken or is my program broken?" question, because the assertion *is* the
 program's intent, checkable independently of the engine.
 
-Two shapes:
+Three shapes:
 
 ```
 assert rolling days of trips in 180 days limit 90   # the limit is never breached
 assert days of trips & last 180 days <= 90          # a measure vs a bound
 assert days of a <= days of b                        # a measure vs a measure
+assert deploy not in freeze                          # is this moment inside that window?
+assert now in store_hours                            # …the window may be a recurrence
 ```
 
 - The **rolling** shorthand reuses the `limit` already in the syntax: it
@@ -440,6 +449,15 @@ assert days of a <= days of b                        # a measure vs a measure
 - The **comparison** form relates two measures. A measure is `days of
   <intervals>` (a civil-day count) or a plain number. The operators are
   `<=`, `>=`, `<`, `>`, `=` (or `==`), and `!=`.
+- The **membership** form — `<instant> in <stretch>` or `not in` — asks
+  whether a moment falls inside a set (half-open, like every interval). The
+  stretch may be a recurrence such as store hours; it is materialized just
+  around the moment in question, so `assert now in hours` reads "are we
+  open right now?" and composes with `as of` to ask about any other moment.
+  It is tried *after* the comparison form, so a selector's structural `in`
+  (`days of alone in x <= 5`) is never mistaken for it. Membership is
+  absolute — a moment against interval endpoints — so it reduces cleanly
+  to UTC in the desugar.
 
 A failed assertion is **not an error** — it is a false proposition, a
 perfectly valid program with `ok: false` on its query. This is deliberate:
@@ -604,6 +622,50 @@ forces a meaning. A civil step landing in a DST gap shifts forward, like
 any civil projection. And because day steps depend on the lens, the UTC
 view now emits every instant as its **resolved UTC literal** — which also
 freezes `now` at evaluation time, as a reproducible desugar must.
+
+## Business time — `business` and `± n business days|hours`
+
+"Respond within 8 business hours." "Ships in 3 business days." Everyone
+reimplements this, and most get it subtly wrong. The language treats it the
+way it treats the timezone: as a **scoped context**. `timezone =` says where
+you are; `business =` says when you work:
+
+```
+timezone = America/New_York
+holidays = 2026-11-26 .. 2026-11-27
+business = every weekday 09:00 .. 17:00 - holidays   # which days, which hours, minus these
+```
+
+It's a recurrence (the same `every <days> [HH:MM .. HH:MM]` shape as a
+rule) with an optional `- <set>` of exclusions, and it applies to the lines
+below it until re-declared. If you never declare one, it's plain
+**weekdays**, whole days, no holidays — so `+ 3 business days` just works.
+
+Two units read it:
+
+- **`± n business days`** steps civil days, counting only days the calendar
+  covers that aren't excluded, and keeps the wall time — `Fri 15:00 + 1
+  business day` is `Mon 15:00`. Like `+ n days`, it's a civil step, so a bare
+  date stays a date (and gets a date card).
+- **`± n business hours`** *accumulates working time* through the calendar's
+  windows. `Fri 15:00 + 8 business hours` with 09–17 hours is also `Mon
+  15:00` — but by summing the 2h left on Friday and 6h on Monday. A holiday
+  cuts hours out too. Hours introduce a time of day, so the result is a full
+  instant.
+
+Both work backwards (`- 2 business hours` walks into the previous working
+day) and both bind (`sla = 8 business hours` remembers it's business time).
+
+```
+ticket = 2026-11-25 15:00                 # Wednesday, 3pm — Thu/Fri are the holiday
+due    = ticket + 8 business hours        # → Mon 15:00: 2h Wed, skip Thu+Fri+weekend, 6h Mon
+until due                                 # the SLA countdown
+ships  = 2026-11-25 + 3 business days     # → Wed Dec 2
+```
+
+In the UTC view the `business =` line dissolves, exactly like the lens:
+every instant it helped produce is frozen to its resolved literal, so the
+desugared program means the same thing with the calendar gone.
 
 ## Embedding — `load`
 

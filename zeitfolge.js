@@ -132,7 +132,7 @@
 })(typeof self !== "undefined" ? self : this, function () {
 "use strict";
 
-const VERSION = "0.17";
+const VERSION = "0.19";
 const MS = { second: 1000, minute: 60000, hour: 3600000, day: 86400000 };
 
 /* ---------------------------------------------------------------------
@@ -549,7 +549,7 @@ function clip(s) { return s.length > 40 ? s.slice(0, 40) + "…" : s; }
  * ------------------------------------------------------------------- */
 const RESERVED = new Set(["timezone", "until", "since", "now", "days", "length", "of", "partition",
                           "last", "in", "limit", "rolling", "day", "slots", "every", "load",
-                          "first", "next", "alone", "shared", "show", "assert", "as", "calendar"]);
+                          "first", "next", "alone", "shared", "show", "assert", "as", "calendar", "business"]);
 
 function evaluate(src, opts) {
   opts = opts || {};
@@ -567,6 +567,9 @@ function evaluate(src, opts) {
   const bindings = Object.create(null);   // name -> { type:'instant'|'set', ms?, members?, zone, line }
   const statements = [], queries = [];
   let zone = "UTC";                        // the lens — UTC until a timezone statement
+  // the working calendar — `timezone` says where you are, `business` says
+  // when you work. Read by `+ n business days|hours`. null = plain weekdays.
+  let business = null;                     // { rule, except: members[] }
 
   // civil literal -> instant, with the DST-gap warning. Reads through the
   // lens unless a zone is forced (loaded data with a trailing Z is UTC).
@@ -728,6 +731,15 @@ function evaluate(src, opts) {
           pos++;
           return { t: "dur", ms: 0, days: unit[0] === "w" ? n * 7 : n };
         }
+        // <n> business days|hours — through the working calendar in force.
+        // days keep ms:0 so a date stays date-only; hours carry real ms.
+        if (unit === "business") {
+          pos++;
+          const u2 = peek(), unit2 = u2 && u2.kind === "name" ? u2.text : null;
+          if (/^days?$/.test(unit2 || ""))  { pos++; return { t: "dur", ms: 0, days: n, business: "days" }; }
+          if (/^hours?$/.test(unit2 || "")) { pos++; return { t: "dur", ms: n * MS.hour, days: 0, business: "hours" }; }
+          return fail(`business what? — ${t.text} business days or ${t.text} business hours`);
+        }
         return fail(`a bare number isn't a value — did you mean ${t.text} hours, ${t.text} minutes, or ${t.text} days?`);
       }
       if (t.kind === "name") {
@@ -748,6 +760,7 @@ function evaluate(src, opts) {
     // the CALENDAR through the current lens, wall clock preserved (a
     // step into a DST gap shifts forward, like any civil projection)
     function applyDur(ms, dur, sign) {
+      if (dur.business) return applyBusiness(ms, dur, sign);
       let out = ms + sign * dur.ms;
       if (dur.days) {
         const f = epochToCivil(out, zone);
@@ -755,6 +768,49 @@ function evaluate(src, opts) {
         out = civilToEpoch({ y: p.getUTCFullYear(), mo: p.getUTCMonth() + 1, d: p.getUTCDate(), h: f.h, mi: f.mi, s: f.s }, zone);
       }
       return out;
+    }
+
+    // ± n business days|hours, through the working calendar in force.
+    // DAYS step civil days, counting only days the calendar covers that
+    // aren't excluded (a holiday), and keep the wall time — Fri 15:00 + 1
+    // business day is Mon 15:00. HOURS accumulate working time through the
+    // calendar's windows — Fri 15:00 + 8 business hours (09–17) lands Mon
+    // 15:00 too, but by summing the 2h left on Friday and 6h on Monday.
+    function applyBusiness(ms, dur, sign) {
+      const cal = business || { rule: { days: [1, 2, 3, 4, 5], startMin: 0, endMin: 1440, zone, text: "every weekday" }, except: [] };
+      const r = cal.rule;
+      const onHoliday = (o) => cal.except.some((e) => e.start < o.end && o.start < e.end);
+      if (dur.business === "days") {
+        const f0 = epochToCivil(ms, zone);
+        let f = dayOnly(f0), left = dur.days;
+        for (let i = 0; i < RULE_CAP && left > 0; i++) {
+          f = addDaysF(f, sign);
+          const o = ruleOccurrence(r, f);
+          if (o && !onHoliday(o)) left--;
+        }
+        if (left > 0) warn(ln, `business-day step ran past ${RULE_CAP} days`);
+        return civilToEpoch({ ...f, h: f0.h, mi: f0.mi, s: f0.s }, zone);
+      }
+      // hours
+      const horizon = 400 * MS.day;
+      const span = sign > 0 ? [ms, ms + horizon] : [ms - horizon, ms];
+      const occ = subtractSets(ruleOccurrences(r, span[0], span[1]).members, cal.except).sort((a, b) => a.start - b.start);
+      let left = dur.ms;
+      if (sign > 0) {
+        for (const o of occ) {
+          const s = Math.max(o.start, ms); if (s >= o.end) continue;
+          if (o.end - s >= left) return s + left;
+          left -= o.end - s;
+        }
+      } else {
+        for (let i = occ.length - 1; i >= 0; i--) {
+          const o = occ[i], e = Math.min(o.end, ms); if (e <= o.start) continue;
+          if (e - o.start >= left) return e - left;
+          left -= e - o.start;
+        }
+      }
+      warn(ln, `business-hour step ran past the ${Math.round(horizon / MS.day)}-day horizon`);
+      return sign > 0 ? span[1] : span[0];
     }
 
     const unbounded = (op) =>
@@ -1003,6 +1059,30 @@ function evaluate(src, opts) {
       zone = z;
       statements.push({ kind: "timezone", zone: z, line: ln });
 
+    // business = every <days> [HH:MM .. HH:MM] [- <set>] — the working
+    // calendar in force for the lines below: which days and hours count,
+    // minus holidays. Scoped like the lens. Read by `+ n business days|hours`.
+    } else if ((m = text.match(/^business\s*=\s*(.+)$/))) {
+      const rhs = m[1].trim();
+      const rm = rhs.match(/^every\s+([a-z]+)(?:\s+(\d{1,2}):(\d{2})\s*\.\.\s*(\d{1,2}):(\d{2}))?\s*(?:-\s+(.+))?$/);
+      if (!rm) { err(ln, `business wants a recurrence — e.g. business = every weekday 09:00 .. 17:00 [- holidays]`); continue; }
+      const word = rm[1];
+      const days = word === "day" ? [0, 1, 2, 3, 4, 5, 6]
+                 : word === "weekday" ? [1, 2, 3, 4, 5]
+                 : word in DOW ? [DOW[word]] : null;
+      if (!days) { err(ln, `every what? — day, weekday, or monday…sunday (got "${word}")`); continue; }
+      let startMin = 0, endMin = 1440;
+      if (rm[2] != null) {
+        const h1 = +rm[2], m1 = +rm[3], h2 = +rm[4], m2 = +rm[5];
+        if (h1 > 23 || m1 > 59 || h2 > 23 || m2 > 59) { err(ln, `"${rhs}" is not a real time of day`); continue; }
+        startMin = h1 * 60 + m1; endMin = h2 * 60 + m2;
+        if (startMin === endMin) { err(ln, `a business window must have width — ${rm[2]}:${rm[3]} .. ${rm[4]}:${rm[5]} is empty`); continue; }
+      }
+      let except = [];
+      if (rm[6]) { const v = resolveSet(rm[6].trim(), ln, "business -"); if (!v) continue; except = v.members; }
+      business = { rule: { days, startMin, endMin, zone, text: rhs.replace(/\s+-\s+.+$/, "") }, except };
+      statements.push({ kind: "business", text: rhs, zone, line: ln });
+
     // until / since — the countdown verbs
     } else if ((m = text.match(/^(until|since)\b\s*(.*)$/))) {
       const kind = m[1], target = resolveInstant(m[2].trim(), ln);
@@ -1079,8 +1159,31 @@ function evaluate(src, opts) {
         q = { kind: "assert", form: "compare", claim: body, zone, line: ln,
               toks: [...lhs.toks, ...rhs.toks], ok, op, lhs, rhs };
 
+      // assert <instant> [not] in <stretch> — membership: is this moment inside
+      // that window? The question behind deploy freezes, quiet hours, store
+      // hours, market hours. The stretch may be a recurrence (store hours):
+      // it's materialized just around the moment in question. Tried after the
+      // comparison form so `days of alone in x <= 5` keeps its structural `in`.
+      } else if ((mm = body.match(/^(.+?)\s+(not\s+)?in\s+(.+)$/))) {
+        const inst = resolveInstant(mm[1].trim(), ln);
+        if (!inst) continue;
+        const rhsText = mm[3].trim();
+        const rv = parseExpr(rhsText, ln);
+        if (!rv) continue;
+        let members;
+        if (rv.t === "set") members = rv.members;
+        else if (rv.t === "rule") {
+          const r = ruleOccurrences(rv.rule, inst.ms - 2 * MS.day, inst.ms + 2 * MS.day);   // overnight spills included
+          members = r.members;
+        } else { err(ln, `"${clip(rhsText)}" isn't a stretch to be inside of — give intervals or a recurrence`); continue; }
+        const hit = members.find((m) => m.start <= inst.ms && inst.ms < m.end) || null;   // [start, end)
+        const negated = !!mm[2];
+        q = { kind: "assert", form: "in", claim: body, zone, line: ln,
+              toks: [...(inst.toks || []), ...(rv.toks || [])], ok: negated ? !hit : !!hit, negated,
+              lhs: { expr: mm[1].trim(), ms: inst.ms }, rhs: { expr: rhsText, toks: rv.toks || [] }, hit };
+
       } else {
-        err(ln, `assert wants a proposition — a comparison (days of X <= 90) or a rolling limit (rolling days of X in 180 days limit 90)`); continue;
+        err(ln, `assert wants a proposition — a comparison (days of X <= 90), a rolling limit (rolling days of X in 180 days limit 90), or membership (deploy not in freeze)`); continue;
       }
       queries.push(q); statements.push(q);
 
@@ -1164,7 +1267,7 @@ function evaluate(src, opts) {
         bindings[name] = { type: "instant", ms: v.ms, zone, line: ln, dateOnly: v.dateOnly };
         statements.push({ kind: "bind", name, valueType: "instant", ms: v.ms, zone, line: ln, toks: v.toks });
       } else if (v.t === "dur") {
-        bindings[name] = { type: "duration", dur: { ms: v.ms, days: v.days }, zone, line: ln };
+        bindings[name] = { type: "duration", dur: { ms: v.ms, days: v.days, business: v.business }, zone, line: ln };
         statements.push({ kind: "bind", name, valueType: "duration", zone, line: ln, toks: v.toks });
       } else if (v.t === "rule") {
         // an alias: the rule travels whole, its own zone intact
@@ -1246,6 +1349,7 @@ function desugar(program) {
   };
   for (const st of program.statements) {
     if (st.kind === "timezone") continue;   // the lens dissolves
+    if (st.kind === "business") continue;   // so does the calendar — every business-relative instant is frozen below
     const hadLit = st.toks && st.toks.some((t) => t.kind === "lit");
     // provenance follows the INTERPRETATION lens; a presentation `in <zone>`
     // is display-only and dissolves with the lens, so use lensZone here
@@ -1282,15 +1386,21 @@ function desugar(program) {
       out.push(`slots of ${rebuildToks(st.toks)} every ${st.every}${note}`);
     else if (st.kind === "show") out.push(`show ${rebuildToks(st.toks)}${note}`);
     else if (st.kind === "assert") {
-      // an assertion over civil-day counts is itself irreducibly civil
-      const hasCivil = st.form === "rolling" || st.lhs.kind === "days" || st.rhs.kind === "days";
-      const lz = hasCivil ? lensZone : "UTC";
-      let line;
-      if (st.form === "rolling")
-        line = `assert rolling days of ${rebuildToks(st.toks, lz)} in ${st.windowDays} days limit ${st.limit}`;
-      else {
-        const side = (s) => s.kind === "num" ? String(s.value) : `days of ${rebuildToks(s.toks, lz)}`;
-        line = `assert ${side(st.lhs)} ${st.op} ${side(st.rhs)}`;
+      let line, lz = "UTC";
+      if (st.form === "in") {
+        // membership is absolute — a moment against interval endpoints — so UTC is exact
+        line = `assert ${formatCivil(epochToCivil(st.lhs.ms, "UTC"))} ${st.negated ? "not " : ""}in ${rebuildToks(st.rhs.toks)}`
+             + (/^[A-Za-z_]/.test(st.lhs.expr) ? `   # was: ${st.lhs.expr}` : "");
+      } else {
+        // an assertion over civil-day counts is itself irreducibly civil
+        const hasCivil = st.form === "rolling" || st.lhs.kind === "days" || st.rhs.kind === "days";
+        lz = hasCivil ? lensZone : "UTC";
+        if (st.form === "rolling")
+          line = `assert rolling days of ${rebuildToks(st.toks, lz)} in ${st.windowDays} days limit ${st.limit}`;
+        else {
+          const side = (s) => s.kind === "num" ? String(s.value) : `days of ${rebuildToks(s.toks, lz)}`;
+          line = `assert ${side(st.lhs)} ${st.op} ${side(st.rhs)}`;
+        }
       }
       civil(lz, line);
     }

@@ -1,0 +1,16 @@
+# The Schengen rule's twin — and proof it wasn't a one-off. Many countries
+# make you tax-resident once you've spent 183 days there in a year. Same
+# shape as 90-in-180, different numbers, the same one verb. Visa days, tax
+# days, API rate limits, deploy quotas: they are all `rolling … limit`.
+
+timezone = Europe/Lisbon
+
+in_portugal = 2026-01-10 .. 2026-02-20,
+              2026-04-01 .. 2026-06-15,
+              2026-09-01 .. 2026-10-31
+
+rolling days of in_portugal in 365 days limit 183          # peaks at 179
+assert rolling days of in_portugal in 365 days limit 183   # holds — 4 days to spare
+days of in_portugal & last 365 days                        # used so far this window
+
+# stretch the last stay by a week and watch the assertion flip

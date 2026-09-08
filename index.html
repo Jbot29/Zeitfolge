@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Zeitfolge — time you can read (v0.17)</title>
+<title>Zeitfolge — time you can read (v0.19)</title>
 <style>
   /* Same family as Schauplatz/Klangbild: paper, ink, mono. Zeitfolge's
      accents: indigo (now / the timeline) and copper (the target).
@@ -69,6 +69,11 @@
   .big .u { font-size:10px; letter-spacing:0.14em; text-transform:uppercase; color:var(--ink-soft); }
   .card.passed .big .n { color:var(--copper); }
   .verdict { font-family:var(--serif); font-style:italic; font-size:13px; color:var(--ink-soft); margin-bottom:6px; }
+  /* show — each stretch as a headline, so the options read big and you can pick */
+  .stretches { display:flex; flex-direction:column; margin:4px 0 2px; }
+  .stretch + .stretch { border-top:1px solid var(--ink-faint); margin-top:4px; padding-top:6px; }
+  .big .n.wide { font-size:22px; }
+  .big .cov { color:var(--indigo); text-transform:none; letter-spacing:0.04em; }
   canvas { width:100%; display:block; }
   .segtable { font-size:11px; line-height:1.7; margin-top:6px; white-space:pre; overflow-x:auto; }
   .segtable .cov { color:var(--indigo); }
@@ -97,7 +102,7 @@
 <body>
   <header>
     <h1><span class="fig">Zeitfolge</span> time you can read</h1>
-    <div class="sub">v0.17 — the lens · intervals · the algebra · rolling · slots · load · recurrence · alone / shared · durations · provenance · clocks · calendar · assert · in &lt;zone&gt; · as of</div>
+    <div class="sub">v0.19 — the lens · intervals · the algebra · rolling · slots · load · recurrence · alone / shared · durations · provenance · clocks · calendar · assert · in &lt;zone&gt; · as of · in &lt;stretch&gt; · business time</div>
   </header>
 
   <div class="workspace">
@@ -110,6 +115,7 @@
         <select id="examples"></select>
         <button id="open" class="ghost" title="load a .zf file from disk">open…</button>
         <button id="reset" class="ghost" title="restore the current example">↺ reset</button>
+        <button id="share" class="ghost" title="copy a link that carries this program — no server needed">⎘ copy link</button>
         <input type="file" id="openFile" accept=".zf,.txt,text/plain" hidden>
         <span id="status">ready</span>
       </div>
@@ -337,6 +343,55 @@ days of trips & last 180 days                    # used today
 days of trips & last 180 days as of hamburg      # the day I land
 days of trips & last 180 days as of 2027-05-01   # the day I leave — over 90
 `,
+  "tax residency (183 days)": `# The Schengen rule's twin — and proof it wasn't a one-off. Many countries
+# make you tax-resident once you've spent 183 days there in a year. Same
+# shape as 90-in-180, different numbers, the same one verb. Visa days, tax
+# days, API rate limits, deploy quotas: they are all \`rolling … limit\`.
+
+timezone = Europe/Lisbon
+
+in_portugal = 2026-01-10 .. 2026-02-20,
+              2026-04-01 .. 2026-06-15,
+              2026-09-01 .. 2026-10-31
+
+rolling days of in_portugal in 365 days limit 183          # peaks at 179
+assert rolling days of in_portugal in 365 days limit 183   # holds — 4 days to spare
+days of in_portugal & last 365 days                        # used so far this window
+
+# stretch the last stay by a week and watch the assertion flip
+`,
+  "deploy freeze — is now inside a window?": `# "Is this moment inside that window?" — the question behind deploy
+# freezes, quiet hours, store hours, market hours. \`assert <instant> in
+# <stretch>\` (or \`not in\`) makes it a proposition the plan checks. The
+# stretch can be a recurrence: it's materialized just around the moment.
+
+timezone = America/New_York
+
+hours   = every weekday 09:00 .. 17:00       # when we ship
+holiday = 2026-11-26 .. 2026-11-27           # Thanksgiving — nobody's around
+deploy  = 2026-11-26 14:00                   # the proposed release
+
+assert deploy in hours                       # a weekday afternoon — holds…
+assert deploy not in holiday                 # …but it's Thanksgiving — FAILS
+assert now in hours                          # can I ship right now?
+`,
+  "SLA clock — business days & hours": `# "Respond within 8 business hours." "Ships in 3 business days." Everyone
+# reimplements this and most get it subtly wrong. \`business\` declares the
+# working calendar — which days, which hours, minus holidays — the way
+# \`timezone\` declares the lens. Then \`+ n business days|hours\` reads it.
+
+timezone = America/New_York
+holidays = 2026-11-26 .. 2026-11-27                  # Thanksgiving
+business = every weekday 09:00 .. 17:00 - holidays  # when the clock runs
+
+ticket = 2026-11-25 15:00                           # opened Wednesday, 3pm
+due    = ticket + 8 business hours                  # 2h Wed, skip the holiday, 6h Mon
+until due                                           # the SLA countdown
+
+order  = 2026-11-25
+ships  = order + 3 business days                    # Mon, Tue, Wed → Dec 2
+ships                                               # a date stays a date
+`,
   "assert: a plan that checks itself": `# A program can state what must hold and check itself. An assertion is
 # pure intent in the shared vocabulary — so when it fails, you know it's
 # the PLAN that's wrong, not the tool. Drop a trip's end date to watch
@@ -423,6 +478,80 @@ if (location.protocol.startsWith("http")) {
   grab("data", datain);
 }
 
+/* #src=… (& data=…) — the program carried IN the link. No server, no file:
+   the page is a function of (source, now), so the source can live in the
+   URL. The hash never reaches a server and works from file:// too. Like
+   ?script=, it leaves localStorage alone until you edit. */
+const hashParams = new URLSearchParams(location.hash.replace(/^#/, ""));
+if (hashParams.has("src")) {
+  editor.value = hashParams.get("src");
+  if (hashParams.has("data")) datain.value = hashParams.get("data");
+}
+
+/* #example=<slug> (or ?example=) — a repo example by its short name. For
+   anything already in the dropdown this is the link to share: short, stable,
+   and the repo stays the source of truth. Slugs match the examples/*.zf file
+   names; anything else falls back to a loose match on the dropdown titles.
+   #src= wins over it (explicit code beats a name); it wins over the saved
+   buffer, and like #src= it leaves localStorage alone until you edit. */
+const EXAMPLE_SLUGS = {
+  "schengen": "schengen 90/180",
+  "booking": "booking slots",
+  "availability": "availability (recurrence)",
+  "booking-load": "booking via load",
+  "credits": "credit blocks",
+  "flight": "flight countdown",
+  "timezone-helper": "timezone helper",
+  "planner": "planner's desk",
+  "world-clock": "world clock",
+  "meeting-local": "meeting in my time",
+  "callable-hour": "the callable hour",
+  "schengen-forecast": "as of — time travel",
+  "tax-residency": "tax residency (183 days)",
+  "deploy-freeze": "deploy freeze — is now inside a window?",
+  "sla-clock": "SLA clock — business days & hours",
+  "self-check": "assert: a plan that checks itself",
+  "two-zones": "two zones, one timeline",
+};
+function findExample(want) {
+  if (!want) return null;
+  const direct = EXAMPLE_SLUGS[want];
+  if (direct && EXAMPLES[direct] != null) return direct;
+  const norm = (s) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
+  const w = norm(want), keys = Object.keys(EXAMPLES);
+  return keys.find((k) => norm(k) === w) || keys.find((k) => norm(k).includes(w)) || null;
+}
+const wantExample = hashParams.get("example") || params.get("example");
+if (!hashParams.has("src") && wantExample) {
+  const key = findExample(wantExample);
+  if (key) { examplesSel.value = key; editor.value = EXAMPLES[key]; datain.value = EXAMPLE_DATA[key] || ""; }
+  else setTimeout(() => { status.textContent = `no example called "${wantExample}"`; status.classList.add("err"); }, 0);
+}
+
+/* copy link — build that URL from the current buffer and put it on the
+   clipboard; also drop it in the address bar so the tab itself is shareable */
+function shareLink() {
+  const h = new URLSearchParams();
+  h.set("src", editor.value);
+  if (datain.value.trim()) h.set("data", datain.value);
+  return location.href.replace(/#.*$/, "") + "#" + h.toString();
+}
+async function copyText(t) {
+  try { await navigator.clipboard.writeText(t); return true; } catch (_) {}
+  const ta = document.createElement("textarea");        // file:// / non-secure fallback
+  ta.value = t; document.body.appendChild(ta); ta.select();
+  let ok = false; try { ok = document.execCommand("copy"); } catch (_) {}
+  ta.remove(); return ok;
+}
+document.getElementById("share").onclick = async () => {
+  const link = shareLink();
+  history.replaceState(null, "", link);
+  const ok = await copyText(link);
+  status.classList.remove("err");
+  if (ok) status.textContent = `link copied — ${link.length} chars, carries the whole program`;
+  else window.prompt("copy this link", link);
+};
+
 /* ---- evaluate + render; the whole page is a function of
         (source, data, now), so ticking is just re-running it ---- */
 function onEdit() {
@@ -502,7 +631,7 @@ function buildCard(q) {
       <canvas></canvas><div class="slotlist"></div>`;
   } else if (q.kind === "show") {
     c.innerHTML = `<div class="cap"><span><b></b></span><span class="tz"></span></div>
-      <canvas></canvas><div class="segtable"></div>`;
+      <div class="stretches"></div><canvas></canvas><div class="segtable"></div>`;
   } else {   // days / length
     c.innerHTML = `<div class="cap"><span><b></b></span><span class="tz"></span></div>
       <div class="big"></div><canvas height="40"></canvas>`;
@@ -527,15 +656,52 @@ function updateCard(c, q, now) {
   else updateMeasure(c, q);
 }
 
+// show — the options, big. Each stretch is a headline: the day above, the
+// range as the big number, its length as the unit. Whole-day stretches read
+// as dates; within-a-day ones as times; the timeline strip stays for context.
+// Past a handful, it falls back to the compact table.
 function updateShow(c, q) {
   const n = q.members.length;
-  c.querySelector("b").textContent = `show ${q.expr} — ${n === 0 ? "none" : n === 1 ? "1 stretch" : n + " stretches"}`;
+  c.querySelector("b").textContent = `show ${q.expr} · ${q.zone}`;
+  const p2 = (x) => String(x).padStart(2, "0");
+  const civ = (ms) => Z.epochToCivil(ms, q.zone);
+  const wd = (ms) => new Intl.DateTimeFormat("en-US", { timeZone: q.zone, weekday: "long" }).format(ms);
+  const date = (f) => `${f.y}-${p2(f.mo)}-${p2(f.d)}`;
+  const hm = (f) => `${p2(f.h)}:${p2(f.mi)}`;
+  const dur = (ms) => { const h = Math.floor(ms / 36e5), mi = Math.round((ms % 36e5) / 6e4); return h && mi ? `${h}h ${mi}m` : h ? `${h}h` : `${mi}m`; };
+  const row = (m) => {
+    const s = civ(m.start), e = civ(m.end), eIn = civ(m.end - 1);
+    const whole = s.h === 0 && s.mi === 0 && e.h === 0 && e.mi === 0;
+    const sameDay = date(s) === date(eIn);
+    let head, main, unit;
+    if (whole) {
+      const days = Z.daysTouched([m], q.zone);
+      head = sameDay ? wd(m.start) : `${wd(m.start)} → ${wd(m.end - 1)}`;
+      main = sameDay ? date(s) : `${date(s)} – ${date(eIn)}`;
+      unit = `${days} day${days === 1 ? "" : "s"}`;
+    } else if (sameDay) {
+      head = `${wd(m.start)} · ${date(s)}`;
+      main = `${hm(s)} – ${hm(e)}`;
+      unit = dur(m.end - m.start);
+    } else {
+      head = `${date(s)} → ${date(eIn)}`;
+      main = `${wd(m.start).slice(0, 3)} ${hm(s)} – ${wd(m.end).slice(0, 3)} ${hm(e)}`;
+      unit = dur(m.end - m.start);
+    }
+    const lab = m.labels.length ? `<span class="u cov">${m.labels.join(" + ")}</span>` : "";
+    return `<div class="stretch"><div class="when">${head}</div><div class="big"><span class="seg"><span class="n${main.length > 14 ? " wide" : ""}">${main}</span><span class="u">${unit}</span></span>${lab}</div></div>`;
+  };
+  const st = c.querySelector(".stretches"), tbl = c.querySelector(".segtable");
+  if (n === 0) { st.innerHTML = `<div class="empty">none — no such stretch exists</div>`; tbl.innerHTML = ""; }
+  else if (n <= 8) { st.innerHTML = q.members.map(row).join(""); tbl.innerHTML = ""; }
+  else {   // too many to headline — count up top, the compact table below
+    st.innerHTML = `<div class="when">${n} stretches</div>`;
+    const d = (ms) => Z.formatCivil(civ(ms)).replace(/ 00:00$/, "");
+    tbl.innerHTML = q.members.map((m) =>
+      `${d(m.start)} → ${d(m.end)}   ${String(Z.daysTouched([m], q.zone)).padStart(4)} days` +
+      (m.labels.length ? `   <span class="cov">${m.labels.join(" + ")}</span>` : "")).join("\n");
+  }
   drawSet(c.querySelector("canvas"), q.members, null, q.zone);
-  const d = (ms) => Z.formatCivil(Z.epochToCivil(ms, q.zone)).replace(/ 00:00$/, "");
-  const rows = q.members.map((m) =>
-    `${d(m.start)} → ${d(m.end)}   ${String(Z.daysTouched([m], q.zone)).padStart(4)} days` +
-    (m.labels.length ? `   <span class="cov">${m.labels.join(" + ")}</span>` : ""));
-  c.querySelector(".segtable").innerHTML = rows.join("\n") || "none — no such stretch exists";
 }
 
 /* the booking page: slots as pick-list chips, grouped by civil day */
@@ -683,7 +849,7 @@ function updateNow(c, q, now) {
   const f = Z.epochToCivil(q.ms, q.zone);
   const wd = new Intl.DateTimeFormat("en-US", { timeZone: q.zone, weekday: "long" }).format(q.ms);
   const off = Z.formatOffset(Z.zoneOffset(q.ms, q.zone));
-  c.querySelector("b").textContent = q.label || "now";
+  c.querySelector("b").textContent = `${q.label || "now"} · ${q.zone}`;   // a wall of clocks needs its zones up front
   c.querySelector(".when").textContent = `${wd} · ${f.y}-${p2(f.mo)}-${p2(f.d)}`;
   c.querySelector(".big").innerHTML =
     `<span class="seg"><span class="n">${p2(f.h)}:${p2(f.mi)}:${p2(f.s)}</span><span class="u">${off}</span></span>`;
@@ -696,7 +862,7 @@ function updateDate(c, q) {
   const p2 = (n) => String(n).padStart(2, "0");
   const f = Z.epochToCivil(q.ms, q.zone);
   const wd = new Intl.DateTimeFormat("en-US", { timeZone: q.zone, weekday: "long" }).format(q.ms);
-  c.querySelector("b").textContent = q.label || "date";
+  c.querySelector("b").textContent = `${q.label || "date"} · ${q.zone}`;
   c.querySelector(".big").innerHTML =
     `<span class="seg"><span class="n">${f.y}-${p2(f.mo)}-${p2(f.d)}</span><span class="u">${wd}</span></span>`;
 }
@@ -717,6 +883,11 @@ function updateAssert(c, q) {
       const f = Z.epochToCivil(q.peakMs, q.zone);
       detail = `peak ${q.peak} on ${f.y}-${p2(f.mo)}-${p2(f.d)} — over the ${q.limit}-day limit by ${q.peak - q.limit}`;
     }
+  } else if (q.form === "in") {
+    const civ = (ms) => Z.formatCivil(Z.epochToCivil(ms, q.zone));
+    detail = q.hit
+      ? `${q.lhs.expr} = ${civ(q.lhs.ms)} — inside ${q.rhs.expr} (${civ(q.hit.start)} → ${civ(q.hit.end)})`
+      : `${q.lhs.expr} = ${civ(q.lhs.ms)} — outside ${q.rhs.expr}`;
   } else {
     const side = (s) => s.kind === "num" ? `${s.value}` : `days of ${s.expr} (${s.value})`;
     detail = `${side(q.lhs)} ${q.op} ${side(q.rhs)}`;

@@ -439,6 +439,70 @@ test("assert: nonsense gets a pointed hint", () => {
   assert.match(errorsOf("assert = 2026-01-01")[0], /measure/);
 });
 
+test("assert <instant> [not] in <stretch>: membership, against a set or a recurrence", () => {
+  const base = "timezone = America/New_York\nhours = every weekday 09:00 .. 17:00\nholiday = 2026-11-26 .. 2026-11-27\ndeploy = 2026-11-26 14:00\n";
+  const ok = (s) => run(base + s).queries.find((q) => q.kind === "assert").ok;
+  assert.equal(ok("assert deploy in holiday"), true);            // Thanksgiving
+  assert.equal(ok("assert deploy not in holiday"), false);
+  assert.equal(ok("assert deploy in hours"), true);              // Thu 14:00 — inside a RULE's hours
+  assert.equal(ok("assert 2026-11-28 14:00 in hours"), false);   // Saturday
+  assert.equal(ok("assert now in hours as of 2026-11-28 14:00"), false);   // `now` is a moment too
+  // membership reports which stretch it landed in
+  const q = run(base + "assert deploy in holiday").queries.find((q) => q.kind === "assert");
+  assert.equal(q.form, "in");
+  assert.ok(q.hit && q.hit.start <= q.lhs.ms && q.lhs.ms < q.hit.end);
+});
+
+test("assert in: a selector's structural `in` still wins inside a comparison; a bad stretch is refused", () => {
+  assert.equal(run("a = 2026-01-01 .. 2026-01-05\nassert days of alone in a <= 5").queries[0].form, "compare");
+  assert.match(errorsOf("d = 2026-01-01\nassert d in 3 hours")[0], /isn't a stretch/);
+});
+
+test("assert in desugars to a frozen instant; membership is absolute, so it round-trips", () => {
+  const base = "timezone = America/New_York\nhours = every weekday 09:00 .. 17:00\ndeploy = 2026-11-26 14:00\n";
+  const a = run(base + "assert deploy in hours");
+  const line = Z.desugar(a).split("\n").find((l) => l.startsWith("assert"));
+  assert.match(line, /^assert 2026-11-26 19:00 in hours/);   // 14:00 EST = 19:00 UTC
+  assert.equal(run(Z.desugar(a)).queries.find((q) => q.kind === "assert").ok, true);
+});
+
+/* ------------------------------------------ business time (v0.19) */
+
+test("± n business days: skip weekends and holidays, keep the wall time", () => {
+  const hdr = "timezone = America/New_York\n";
+  const at = (s, n) => run(hdr + s).bindings[n].ms;
+  // Fri 15:00 + 1 business day = Mon 15:00 — the weekend doesn't count
+  assert.equal(at("x = 2026-11-20 15:00\ny = x + 1 business days", "y"), Date.UTC(2026, 10, 23, 20));   // 15:00 EST
+  // a holiday doesn't count either: Thu + 3 business days with Fri off → Mon, Tue, Wed
+  const y = run(hdr + "business = every weekday - 2026-11-27 .. 2026-11-27\nx = 2026-11-26\ny = x + 3 business days").bindings.y;
+  assert.equal(Z.epochToCivil(y.ms, "America/New_York").d, 2);   // Dec 2
+  assert.equal(y.dateOnly, true);                                 // a date stays a date
+  // and backwards
+  assert.equal(Z.epochToCivil(at("x = 2026-11-23 10:00\ny = x - 1 business days", "y"), "America/New_York").d, 20);   // Fri
+});
+
+test("± n business hours: accumulate working time through the calendar", () => {
+  const hdr = "timezone = America/New_York\nbusiness = every weekday 09:00 .. 17:00\n";
+  const civ = (s, n) => { const f = Z.epochToCivil(run(hdr + s).bindings[n].ms, "America/New_York"); return `${f.d} ${f.h}:${String(f.mi).padStart(2, "0")}`; };
+  assert.equal(civ("x = 2026-11-20 15:00\ny = x + 8 business hours", "y"), "23 15:00");   // 2h Fri + 6h Mon
+  assert.equal(civ("x = 2026-11-23 10:00\ny = x - 2 business hours", "y"), "20 16:00");   // 1h Mon + 1h back into Fri
+  // holidays cut hours too: Wed 15:00 + 8h with Thu+Fri off → Mon 15:00
+  assert.equal(civ("business = every weekday 09:00 .. 17:00 - 2026-11-26 .. 2026-11-27\nx = 2026-11-25 15:00\ny = x + 8 business hours", "y"), "30 15:00");
+  // a bound duration carries its business-ness
+  assert.equal(civ("sla = 8 business hours\nt = 2026-11-20 15:00\ndue = t + sla", "due"), "23 15:00");
+  // hours introduce a time-of-day, so the result is no longer date-only
+  assert.equal(run(hdr + "x = 2026-11-26\ny = x + 8 business hours").bindings.y.dateOnly, false);
+});
+
+test("business: the calendar dissolves in the UTC view; what it produced is frozen; errors are pointed", () => {
+  const src = "timezone = America/New_York\nbusiness = every weekday 09:00 .. 17:00\nt = 2026-11-20 15:00\ndue = t + 8 business hours\nuntil due";
+  const a = run(src), d = Z.desugar(a);
+  assert.ok(!/^business/m.test(d));
+  assert.equal(run(d).bindings.due.ms, a.bindings.due.ms);
+  assert.match(errorsOf("x = 2026-11-26\ny = x + 3 business weeks")[0], /business what/);
+  assert.match(errorsOf("business = 2026-01-01 .. 2026-01-05")[0], /wants a recurrence/);
+});
+
 /* ------------------------------------------------- slots (v0.4) */
 
 test("slots: free time chopped into offerable pieces", () => {

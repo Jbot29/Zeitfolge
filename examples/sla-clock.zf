@@ -1,0 +1,16 @@
+# "Respond within 8 business hours." "Ships in 3 business days." Everyone
+# reimplements this and most get it subtly wrong. `business` declares the
+# working calendar — which days, which hours, minus holidays — the way
+# `timezone` declares the lens. Then `+ n business days|hours` reads it.
+
+timezone = America/New_York
+holidays = 2026-11-26 .. 2026-11-27                  # Thanksgiving
+business = every weekday 09:00 .. 17:00 - holidays  # when the clock runs
+
+ticket = 2026-11-25 15:00                           # opened Wednesday, 3pm
+due    = ticket + 8 business hours                  # 2h Wed, skip the holiday, 6h Mon
+until due                                           # the SLA countdown
+
+order  = 2026-11-25
+ships  = order + 3 business days                    # Mon, Tue, Wed → Dec 2
+ships                                               # a date stays a date
