@@ -1,17 +1,13 @@
 # The remote worker's wall: what time is it, right now, for everyone?
-# `now` is `until` with the target dropped — what's left is a clock,
-# read through whatever lens is in force. Stack the zones you live
-# across and the page IS a world clock; each ticks live. The UTC view
-# collapses them all to one `now` — proof it was always one instant.
+# `now` is a clock; `in` takes a LIST of zones — one instant read through
+# several lenses, one card, one row each. They all tick, and the thin bar
+# on every row says where that city is in its day: Tokyo's asleep, LA
+# hasn't woken up. Written order is kept, so you arrange the wall.
 
+now in Europe/Vienna, America/New_York, Asia/Tokyo, America/Los_Angeles
+
+# the same trick answers "what's the standup for everyone?" — a bound
+# meeting is a clock too, it just doesn't tick
 timezone = Europe/Vienna
-now                              # home
-
-timezone = America/New_York
-now                              # the team
-
-timezone = Asia/Tokyo
-now                              # already tomorrow
-
-timezone = America/Los_Angeles
-now                              # still yesterday's afternoon
+standup = 2026-07-14 17:00
+standup in Europe/Vienna, America/New_York, Asia/Tokyo

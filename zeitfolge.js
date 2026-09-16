@@ -132,7 +132,7 @@
 })(typeof self !== "undefined" ? self : this, function () {
 "use strict";
 
-const VERSION = "0.19";
+const VERSION = "0.20";
 const MS = { second: 1000, minute: 60000, hour: 3600000, day: 86400000 };
 
 /* ---------------------------------------------------------------------
@@ -1001,11 +1001,16 @@ function evaluate(src, opts) {
   // Disambiguated from structural `in` (alone in, rolling … in n days) by
   // requiring the tail to be a real IANA zone.
   function splitZone(text) {
-    // the body before `in` is optional, so a bare `calendar in Asia/Tokyo`
-    // (no operand — just this month, in that zone) splits too
-    const mm = text.match(/^(?:(.*\S)\s+)?in\s+([\w/+\-]+)\s*$/);
-    if (mm && isValidZone(mm[2])) return { body: (mm[1] || "").trim(), showZone: mm[2] };
-    return { body: text, showZone: null };
+    // the body before `in` is optional (a bare `calendar in Asia/Tokyo`), and
+    // the tail may be a LIST of zones — one instant read through several
+    // lenses, one card (the world clock). Every element must be a real IANA
+    // zone, or the tail isn't a zone list at all and stays in the expression.
+    const mm = text.match(/^(?:(.*\S)\s+)?in\s+([\w/+\-]+(?:\s*,\s*[\w/+\-]+)*)\s*$/);
+    if (mm) {
+      const zones = mm[2].split(/\s*,\s*/);
+      if (zones.every(isValidZone)) return { body: (mm[1] || "").trim(), showZone: zones[0], showZones: zones };
+    }
+    return { body: text, showZone: null, showZones: null };
   }
 
   // a comparable measure for `assert`: a civil-day count or a plain number.
@@ -1189,10 +1194,11 @@ function evaluate(src, opts) {
 
     // show — the interrogation verb: is it there, and where?
     } else if ((m = text.match(/^show\b\s*(.*)$/))) {
-      const { body, showZone } = splitZone(m[1].trim());
+      const { body, showZone, showZones } = splitZone(m[1].trim());
       const v = resolveSet(body, ln, "show");
       if (!v) continue;
-      const q = { kind: "show", expr: body, members: v.members, zone: showZone || zone, lensZone: zone, line: ln, toks: v.toks };
+      const q = { kind: "show", expr: body, members: v.members, zone: showZone || zone, zones: showZones || [showZone || zone],
+                  lensZone: zone, line: ln, toks: v.toks };
       queries.push(q); statements.push(q);
 
     // calendar — `now` zoomed out to a month. Bare, it's the current month
@@ -1287,11 +1293,12 @@ function evaluate(src, opts) {
     // the present. Put a meeting in its owner's zone, re-aim the lens,
     // and name it again to read it in yours.
     } else {
-      const { body, showZone } = splitZone(text);
+      const { body, showZone, showZones } = splitZone(text);
       const v = parseExpr(body, ln);
       if (!v) continue;                        // parseExpr already said why
       if (v.t === "inst") {
-        const q = { kind: "now", ms: v.ms, zone: showZone || zone, lensZone: zone, line: ln, label: body, dateOnly: !!v.dateOnly };
+        const q = { kind: "now", ms: v.ms, zone: showZone || zone, zones: showZones || [showZone || zone],
+                    lensZone: zone, line: ln, label: body, dateOnly: !!v.dateOnly };
         queries.push(q); statements.push(q);
       } else if (v.t === "set") {
         err(ln, `"${clip(text)}" is a stretch of time, not an instant — ask "show ${clip(text)}", "days of …", or "length of …"`);
@@ -1409,10 +1416,13 @@ function desugar(program) {
     // any other instant (this is what freezes `now` at evaluation time).
     // A stack of world-clock lines collapses here to identical literals:
     // proof they were always one instant, only differently presented.
-    else if (st.kind === "now")
+    else if (st.kind === "now") {
+      // a zone LIST (a world clock) collapses to one literal too — the note names every lens it was read through
+      const zl = st.zones && st.zones.length > 1 ? st.zones.join(", ") : st.zone;
       out.push(`${formatCivil(epochToCivil(st.ms, "UTC"))}${/^[A-Za-z_]/.test(st.label || "")
-        ? `   # was: ${st.label}${st.zone !== "UTC" ? ` (${st.zone})` : ""}`
-        : st.zone !== "UTC" ? `   # was read in ${st.zone}` : ""}`);
+        ? `   # was: ${st.label}${zl !== "UTC" ? ` (${zl})` : ""}`
+        : zl !== "UTC" ? `   # was read in ${zl}` : ""}`);
+    }
     // a calendar is a display of a month (or a span of months) — freeze its
     // instant, or its set, like a clock does
     else if (st.kind === "calendar")

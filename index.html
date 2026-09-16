@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Zeitfolge — time you can read (v0.19)</title>
+<title>Zeitfolge — time you can read (v0.20)</title>
 <style>
   /* Same family as Schauplatz/Klangbild: paper, ink, mono. Zeitfolge's
      accents: indigo (now / the timeline) and copper (the target).
@@ -45,6 +45,16 @@
   .spec-body pre { font-family:var(--mono); font-size:11.5px; line-height:1.55; background:var(--paper-deep);
     padding:10px 12px; border:1.5px solid var(--ink-faint); overflow-x:auto; margin:6px 0; }
   .spec-body a { color:var(--indigo); }
+  /* the live zone list — what this browser's Intl actually accepts */
+  .spec-body details.zones { margin:8px 0 0; }
+  .spec-body details.zones summary { cursor:pointer; font-family:var(--serif); font-style:italic; font-size:12px; color:var(--indigo); }
+  .spec-body details.zones summary code { font-style:normal; }
+  #zonefilter { width:100%; margin:8px 0 6px; font-family:var(--mono); font-size:12px; padding:6px 8px;
+    border:2px solid var(--ink); background:#fbf9f1; color:var(--ink); }
+  #zonefilter:focus { outline:none; border-color:var(--indigo); }
+  #zonelist { max-height:40vh; overflow:auto; padding-right:4px; }
+  #zonelist .slotday { margin:8px 0 3px; }
+  .chip.zone { cursor:pointer; }
 
   .workspace { flex:1; display:grid; grid-template-columns:minmax(320px,5fr) minmax(380px,7fr); gap:14px; min-height:0; }
   .col { display:flex; flex-direction:column; gap:8px; min-height:0; min-width:0; }
@@ -89,6 +99,16 @@
   /* show — each stretch as a headline, so the options read big and you can pick */
   .stretches { display:flex; flex-direction:column; margin:4px 0 2px; }
   .stretch + .stretch { border-top:1px solid var(--ink-faint); margin-top:4px; padding-top:6px; }
+  .zonehd { font-size:10px; letter-spacing:0.14em; text-transform:uppercase; color:var(--indigo); margin:10px 0 0; }
+  /* a world clock — one instant, several lenses, one row each */
+  .clocks { display:grid; grid-template-columns:auto auto auto auto minmax(90px,1fr); gap:5px 14px;
+    align-items:center; margin:8px 0 2px; }
+  .clockrow { display:contents; }
+  .clockrow .city { font-weight:600; color:var(--indigo); font-size:13px; white-space:nowrap; }
+  .clockrow .cdate { font-size:11px; color:var(--ink-soft); white-space:nowrap; }
+  .clockrow .ctime { font-size:20px; font-weight:500; font-variant-numeric:tabular-nums; letter-spacing:-0.01em; }
+  .clockrow .coff { font-size:10px; letter-spacing:0.1em; color:var(--ink-soft); white-space:nowrap; }
+  .clockrow canvas.cbar { width:100%; display:block; }
   .big .n.wide { font-size:22px; }
   .big .cov { color:var(--indigo); text-transform:none; letter-spacing:0.04em; }
   canvas { width:100%; display:block; }
@@ -130,9 +150,15 @@
     <div class="spec-body">
       <h4>Two kinds of time</h4>
       <table class="cheat">
-        <tr><td>timezone = Europe/Vienna</td><td>the lens — civil literals below are read through it, answers shown through it. Never part of the data.</td></tr>
+        <tr><td>timezone = Europe/Vienna</td><td>the lens — civil literals below are read through it, answers shown through it. Never part of the data. Names are IANA <code>Region/City</code> (underscores for spaces) or <code>UTC</code> — <a href="https://en.wikipedia.org/wiki/List_of_tz_database_time_zones" target="_blank" rel="noopener">the full list</a>.</td></tr>
         <tr><td>business = every weekday 09:00 .. 17:00 - holidays</td><td>the working calendar — where the lens says where you are, this says when you work.</td></tr>
       </table>
+      <details class="zones">
+        <summary>every zone this browser knows <span id="zonecount"></span> — the exact names <code>timezone =</code> accepts. Type to filter; click one to drop it into your program.</summary>
+        <input id="zonefilter" type="search" placeholder="filter — e.g. vienna, america/, tokyo — or type a full name to check it" spellcheck="false" autocomplete="off">
+        <div class="more" style="margin:0 0 6px">Some zones are listed under an older spelling (<code>Asia/Calcutta</code> for <code>Asia/Kolkata</code>, <code>Europe/Kiev</code> for <code>Europe/Kyiv</code>). The modern name works too — type it in full and it shows as accepted.</div>
+        <div id="zonelist"></div>
+      </details>
 
       <h4>Declare</h4>
       <table class="cheat">
@@ -149,6 +175,7 @@
       <h4>See</h4>
       <table class="cheat">
         <tr><td>now &nbsp; · &nbsp; flight &nbsp; · &nbsp; now in Asia/Tokyo</td><td>a bare instant is a clock. <code>in &lt;zone&gt;</code> shows it in another zone.</td></tr>
+        <tr><td>now in Europe/Vienna, Asia/Tokyo, America/New_York</td><td>a list of zones — one instant, one card, a row per lens: the world clock. Works on a meeting, and on <code>show</code>.</td></tr>
         <tr><td>calendar &nbsp; · &nbsp; calendar trips</td><td>this month — or every month a stretch spans, its days shaded.</td></tr>
         <tr><td>until flight &nbsp; · &nbsp; since 2026-01-01</td><td>countdown / count-up, live.</td></tr>
         <tr><td>show trips in Europe/London</td><td>the stretches, big — one per option.</td></tr>
@@ -354,22 +381,18 @@ calendar trips                   # every month my trips touch, days shaded
 calendar last 180 days           # the whole Schengen window, one card
 `,
   "world clock": `# The remote worker's wall: what time is it, right now, for everyone?
-# \`now\` is \`until\` with the target dropped — what's left is a clock,
-# read through whatever lens is in force. Stack the zones you live
-# across and the page IS a world clock; each ticks live — all of them one
-# and the same instant, only differently presented.
+# \`now\` is a clock; \`in\` takes a LIST of zones — one instant read through
+# several lenses, one card, one row each. They all tick, and the thin bar
+# on every row says where that city is in its day: Tokyo's asleep, LA
+# hasn't woken up. Written order is kept, so you arrange the wall.
 
+now in Europe/Vienna, America/New_York, Asia/Tokyo, America/Los_Angeles
+
+# the same trick answers "what's the standup for everyone?" — a bound
+# meeting is a clock too, it just doesn't tick
 timezone = Europe/Vienna
-now                              # home
-
-timezone = America/New_York
-now                              # the team
-
-timezone = Asia/Tokyo
-now                              # already tomorrow
-
-timezone = America/Los_Angeles
-now                              # still yesterday's afternoon
+standup = 2026-07-14 17:00
+standup in Europe/Vienna, America/New_York, Asia/Tokyo
 `,
   "meeting in my time": `# The inbound question: someone sends a meeting in THEIR zone — what
 # time is that for me? Store each instant once, in the sender's zone,
@@ -403,9 +426,8 @@ blr = every day 07:00 .. 22:00
 
 window = (sf & span) & (ldn & span) & (blr & span)
 
-show window in America/Los_Angeles       # → 07:00–09:30, breakfast in SF
-show window in Europe/London             # → 15:00–17:30, afternoon in London
-show window in Asia/Kolkata              # → 19:30–22:00, evening in Bangalore
+show window in America/Los_Angeles, Europe/London, Asia/Kolkata
+#  → 07:00–09:30 breakfast in SF · 15:00–17:30 afternoon in London · 19:30–22:00 evening in Bangalore
 `,
   "as of — time travel": `# The whole program is a pure function of \`now\`, so \`as of <instant>\`
 # just runs a line at a different present. "How many Schengen days will I
@@ -536,9 +558,58 @@ document.getElementById("reset").onclick = () => examplesSel.onchange();
 /* the spec — a one-page cheat-sheet in a native dialog. Esc, the ✕, or a
    click on the backdrop closes it. */
 const specDlg = document.getElementById("specdlg");
-document.getElementById("spec").onclick = () => specDlg.showModal();
+document.getElementById("spec").onclick = () => { specDlg.showModal(); buildZones(); };
 document.getElementById("specclose").onclick = () => specDlg.close();
 specDlg.onclick = (e) => { if (e.target === specDlg) specDlg.close(); };
+
+/* the live zone list — the exact names THIS browser's Intl accepts, which is
+   exactly what `timezone =` validates against (Intl is the only tz database).
+   Built once on first open, grouped by region; filter as you type; click a
+   zone to drop `timezone = <zone>` into the editor at the cursor. */
+const zoneList = document.getElementById("zonelist");
+const zoneFilter = document.getElementById("zonefilter");
+const zoneCount = document.getElementById("zonecount");
+let zonesAll = null;
+function buildZones() {
+  if (zonesAll) return;
+  zonesAll = typeof Intl.supportedValuesOf === "function" ? Intl.supportedValuesOf("timeZone") : [];
+  if (!zonesAll.length) {
+    zoneList.innerHTML = `<div class="more">this browser can't enumerate its zones — use the Wikipedia list above</div>`;
+    zoneFilter.hidden = true; return;
+  }
+  zoneCount.textContent = `(${zonesAll.length})`;
+  renderZones("");
+}
+function renderZones(q) {
+  const raw = q.trim(), needle = raw.toLowerCase();
+  const hits = zonesAll.filter((z) => !needle || z.toLowerCase().includes(needle));
+  const groups = new Map();
+  for (const z of hits) {
+    const r = z.includes("/") ? z.slice(0, z.indexOf("/")) : "Other";
+    if (!groups.has(r)) groups.set(r, []);
+    groups.get(r).push(z);
+  }
+  const chip = (z) => `<span class="chip zone" data-z="${z}">${z}</span>`;
+  let html = "";
+  // the filter doubles as a validator: ICU enumerates some zones only under an
+  // older spelling (Asia/Calcutta, never Asia/Kolkata) and never lists UTC — but
+  // the engine accepts all of them. If what you typed is a zone the engine
+  // takes and the list didn't surface it, show it as accepted.
+  if (raw && !hits.some((z) => z.toLowerCase() === needle) && Z.isValidZone(raw))
+    html += `<div class="slotday">accepted · a valid name the list spells differently</div><div class="chips">${chip(raw)}</div>`;
+  if (!raw) html += `<div class="slotday">always</div><div class="chips">${chip("UTC")}</div>`;
+  html += [...groups].map(([r, zs]) => `<div class="slotday">${r} · ${zs.length}</div><div class="chips">${zs.map(chip).join("")}</div>`).join("");
+  zoneList.innerHTML = html || `<div class="more">no zone matches "${q}" — and it isn't a name this browser accepts</div>`;
+}
+zoneFilter.oninput = () => renderZones(zoneFilter.value);
+zoneList.onclick = (e) => {
+  const chip = e.target.closest(".chip.zone"); if (!chip) return;
+  const line = `timezone = ${chip.dataset.z}\n`;
+  const at = editor.selectionStart || 0;
+  editor.value = editor.value.slice(0, at) + line + editor.value.slice(at);
+  editor.selectionStart = editor.selectionEnd = at + line.length;
+  specDlg.close(); editor.focus(); onEdit();
+};
 
 /* open… — a file picker, so it works from file:// and http alike */
 const openFile = document.getElementById("openFile");
@@ -697,6 +768,9 @@ function buildCard(q) {
   if (q.kind === "until" || q.kind === "since") {
     c.innerHTML = `<div class="cap"><span><b></b></span><span class="tz"></span></div>
       <div class="when"></div><div class="big"></div><div class="verdict"></div><canvas height="56"></canvas>`;
+  } else if (q.kind === "now" && q.zones && q.zones.length > 1) {
+    c.innerHTML = `<div class="cap"><span><b></b></span><span class="tz"></span></div>
+      <div class="clocks"></div>`;   // a world clock: one instant, one row per lens
   } else if (q.kind === "now") {
     c.innerHTML = q.dateOnly
       ? `<div class="cap"><span><b></b></span><span class="tz"></span></div>
@@ -735,6 +809,7 @@ function updateCard(c, q, now) {
   if (q.asOf != null) { const f = Z.epochToCivil(q.asOf, q.zone); tz += `  ·  as of ${f.y}-${p2(f.mo)}-${p2(f.d)}`; }
   c.querySelector(".tz").textContent = tz;
   if (q.kind === "until" || q.kind === "since") updateCountdown(c, q, now);
+  else if (q.kind === "now" && q.zones && q.zones.length > 1) updateClocks(c, q);
   else if (q.kind === "now") q.dateOnly ? updateDate(c, q) : updateNow(c, q, now);
   else if (q.kind === "calendar") updateCalendar(c, q);
   else if (q.kind === "assert") updateAssert(c, q);
@@ -751,20 +826,23 @@ function updateCard(c, q, now) {
 // Past a handful, it falls back to the compact table.
 function updateShow(c, q) {
   const n = q.members.length;
-  c.querySelector("b").textContent = `show ${q.expr} · ${q.zone}`;
+  const zones = q.zones && q.zones.length ? q.zones : [q.zone];
+  const multi = zones.length > 1;   // `show x in A, B, C` — the same stretches, one block per lens
+  c.querySelector("b").textContent = multi ? `show ${q.expr}` : `show ${q.expr} · ${q.zone}`;
+  if (multi) c.querySelector(".tz").textContent = `${zones.length} zones`;
   const p2 = (x) => String(x).padStart(2, "0");
-  const civ = (ms) => Z.epochToCivil(ms, q.zone);
-  const wd = (ms) => new Intl.DateTimeFormat("en-US", { timeZone: q.zone, weekday: "long" }).format(ms);
-  const date = (f) => `${f.y}-${p2(f.mo)}-${p2(f.d)}`;
-  const hm = (f) => `${p2(f.h)}:${p2(f.mi)}`;
   const dur = (ms) => { const h = Math.floor(ms / 36e5), mi = Math.round((ms % 36e5) / 6e4); return h && mi ? `${h}h ${mi}m` : h ? `${h}h` : `${mi}m`; };
-  const row = (m) => {
+  const row = (m, z) => {
+    const civ = (ms) => Z.epochToCivil(ms, z);
+    const wd = (ms) => new Intl.DateTimeFormat("en-US", { timeZone: z, weekday: "long" }).format(ms);
+    const date = (f) => `${f.y}-${p2(f.mo)}-${p2(f.d)}`;
+    const hm = (f) => `${p2(f.h)}:${p2(f.mi)}`;
     const s = civ(m.start), e = civ(m.end), eIn = civ(m.end - 1);
     const whole = s.h === 0 && s.mi === 0 && e.h === 0 && e.mi === 0;
     const sameDay = date(s) === date(eIn);
     let head, main, unit;
     if (whole) {
-      const days = Z.daysTouched([m], q.zone);
+      const days = Z.daysTouched([m], z);
       head = sameDay ? wd(m.start) : `${wd(m.start)} → ${wd(m.end - 1)}`;
       main = sameDay ? date(s) : `${date(s)} – ${date(eIn)}`;
       unit = `${days} day${days === 1 ? "" : "s"}`;
@@ -780,12 +858,14 @@ function updateShow(c, q) {
     const lab = m.labels.length ? `<span class="u cov">${m.labels.join(" + ")}</span>` : "";
     return `<div class="stretch"><div class="when">${head}</div><div class="big"><span class="seg"><span class="n${main.length > 14 ? " wide" : ""}">${main}</span><span class="u">${unit}</span></span>${lab}</div></div>`;
   };
+  const city = (z) => z.split("/").pop().replace(/_/g, " ");
+  const block = (z) => (multi ? `<div class="zonehd">${city(z)} · ${z}</div>` : "") + q.members.map((m) => row(m, z)).join("");
   const st = c.querySelector(".stretches"), tbl = c.querySelector(".segtable");
   if (n === 0) { st.innerHTML = `<div class="empty">none — no such stretch exists</div>`; tbl.innerHTML = ""; }
-  else if (n <= 8) { st.innerHTML = q.members.map(row).join(""); tbl.innerHTML = ""; }
-  else {   // too many to headline — count up top, the compact table below
+  else if (n <= 8) { st.innerHTML = zones.map(block).join(""); tbl.innerHTML = ""; }
+  else {   // too many to headline — count up top, the compact table below (first lens)
     st.innerHTML = `<div class="when">${n} stretches</div>`;
-    const d = (ms) => Z.formatCivil(civ(ms)).replace(/ 00:00$/, "");
+    const d = (ms) => Z.formatCivil(Z.epochToCivil(ms, q.zone)).replace(/ 00:00$/, "");
     tbl.innerHTML = q.members.map((m) =>
       `${d(m.start)} → ${d(m.end)}   ${String(Z.daysTouched([m], q.zone)).padStart(4)} days` +
       (m.labels.length ? `   <span class="cov">${m.labels.join(" + ")}</span>` : "")).join("\n");
@@ -1039,19 +1119,44 @@ function updateCalendar(c, q) {
   c.querySelector(".calmonths").innerHTML = html;
 }
 
+// a world clock — one instant read through several lenses, one row each:
+// city · weekday date · time · offset · a thin day-bar. Rows tick if the
+// instant is `now`; a bound meeting sits still. Written order is kept, so
+// you arrange the wall. Four clock cards collapse to about one.
+function updateClocks(c, q) {
+  const p2 = (n) => String(n).padStart(2, "0");
+  c.querySelector("b").textContent = q.label || "now";
+  let tz = `${q.zones.length} zones`;
+  if (q.asOf != null) { const a = Z.epochToCivil(q.asOf, q.zones[0]); tz += `  ·  as of ${a.y}-${p2(a.mo)}-${p2(a.d)}`; }
+  c.querySelector(".tz").textContent = tz;
+  const rows = q.zones.map((z) => {
+    const f = Z.epochToCivil(q.ms, z);
+    const wd = new Intl.DateTimeFormat("en-US", { timeZone: z, weekday: "short" }).format(q.ms);
+    const city = z.split("/").pop().replace(/_/g, " ");
+    const time = q.dateOnly ? "" : `${p2(f.h)}:${p2(f.mi)}:${p2(f.s)}`;
+    const off = q.dateOnly ? "" : Z.formatOffset(Z.zoneOffset(q.ms, z));
+    return `<div class="clockrow"><span class="city" title="${z}">${city}</span><span class="cdate">${wd} ${f.y}-${p2(f.mo)}-${p2(f.d)}</span>` +
+           `<span class="ctime">${time}</span><span class="coff">${off}</span><canvas class="cbar" height="14"></canvas></div>`;
+  });
+  const wrap = c.querySelector(".clocks");
+  wrap.innerHTML = rows.join("");
+  if (!q.dateOnly) wrap.querySelectorAll("canvas").forEach((cv, i) => drawDayBar(cv, Z.epochToCivil(q.ms, q.zones[i]), 14));
+}
+
 // a thin midnight→midnight bar with a marker at the current time — so a
-// glance shows Tokyo near the start of its day, New York mid-afternoon
-function drawDayBar(canvas, f) {
-  const H = 26;
+// glance shows Tokyo near the start of its day, New York mid-afternoon.
+// H is the bar height; a world-clock row uses a slimmer one.
+function drawDayBar(canvas, f, H = 26) {
   const { ctx, W } = setupCanvas(canvas, H);
+  const slim = H < 20, lw = slim ? 2 : 3, r = slim ? 3 : 4;
   const pad = 2, y = Math.round(H / 2), w = W - pad * 2;
   const frac = (f.h * 3600 + f.mi * 60 + f.s) / 86400;
-  ctx.strokeStyle = "#d8d2c4"; ctx.lineWidth = 3; ctx.lineCap = "round";
+  ctx.strokeStyle = "#d8d2c4"; ctx.lineWidth = lw; ctx.lineCap = "round";
   ctx.beginPath(); ctx.moveTo(pad, y); ctx.lineTo(pad + w, y); ctx.stroke();
   ctx.strokeStyle = "#3d4f9e";
   ctx.beginPath(); ctx.moveTo(pad, y); ctx.lineTo(pad + w * frac, y); ctx.stroke();
   ctx.fillStyle = "#3d4f9e";
-  ctx.beginPath(); ctx.arc(pad + w * frac, y, 4, 0, 7); ctx.fill();
+  ctx.beginPath(); ctx.arc(pad + w * frac, y, r, 0, 7); ctx.fill();
 }
 
 function updateMeasure(c, q) {

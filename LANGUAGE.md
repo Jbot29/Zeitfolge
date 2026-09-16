@@ -1,4 +1,4 @@
-# Zeitfolge — language spec v0.19
+# Zeitfolge — language spec v0.20
 
 A small, code-first language for working with time — asking questions about
 it, and doing algebra on stretches of it. The same source is the data, the
@@ -35,7 +35,13 @@ around them rather than dropping it. Everything else reduces to UTC.
 
 The timezone database is the one piece of machinery we refuse to hand-roll:
 `Intl` ships the full IANA database in every JS engine, so `zeitfolge.js`
-has zero dependencies.
+has zero dependencies. Zone names are the IANA ones — `Region/City`, such as
+`Europe/Vienna`, `America/New_York`, `Asia/Kolkata`, `America/Los_Angeles`
+(underscores for spaces), plus `UTC`. The full list, with offsets, is on
+Wikipedia: [List of tz database time
+zones](https://en.wikipedia.org/wiki/List_of_tz_database_time_zones). A
+name Zeitfolge doesn't recognise is refused on the spot with a hint, so a
+typo can't silently become the wrong zone.
 
 This is a working draft. Scope is deliberately tiny and grows only when a
 real example forces it — never speculatively. v0.1 was forced by the
@@ -65,7 +71,9 @@ manager — "is this moment inside the freeze?" — `assert <instant> in
 <stretch>`, membership as a proposition; v0.19 by every invoice, SLA and
 shipping estimate ever written — "due in 8 business hours", "ships in 3
 business days" — `business =` declares the working calendar the way
-`timezone =` declares the lens.
+`timezone =` declares the lens; v0.20 by four world-clock cards eating the
+screen — `in` takes a list of zones, so one instant reads through every
+lens on one card.
 
 ## Try it live
 
@@ -106,8 +114,10 @@ slots of <intervals> every <n> minutes|hours
                               chop coverage into offerable pieces
 show <intervals>              the interrogation verb: is it there, and where?
 assert <proposition>          the verification verb: does the plan hold?
-show <intervals> in <zone>    read as usual, but show in this zone
-<instant> in <zone>           a clock, shown in a borrowed zone
+show <intervals> in <zone>[, <zone>…]
+                              read as usual, but show in this zone — or these, one card
+<instant> in <zone>[, <zone>…]
+                              a clock in a borrowed zone — or a world clock, one row each
 <query> as of <instant>       run this line at a hypothetical present
 business = every <days> [HH:MM .. HH:MM] [- <set>]
                               the working calendar for the lines below
@@ -203,6 +213,22 @@ lens for anything else:
 meeting in Asia/Tokyo          # the clock, shown in Tokyo
 show window in Europe/London   # the same intervals, London's wall time
 ```
+
+`in` also takes a **list** — one instant, several lenses, **one card**, a row
+per zone. That's the world clock in a single line, and it's how you answer
+"what's the standup for everyone?":
+
+```
+now in Europe/Vienna, America/New_York, Asia/Tokyo, America/Los_Angeles
+standup in Europe/Vienna, America/New_York, Asia/Tokyo
+show window in America/Los_Angeles, Europe/London, Asia/Kolkata
+```
+
+Rows keep the order you wrote them, so you arrange the wall; each carries a
+thin midnight→midnight bar, so a glance says who's asleep. Rows tick when
+the instant is `now` and sit still for a bound meeting. A list is
+all-or-nothing: every element must be a real IANA zone, or the tail is not
+a zone list and stays part of the expression.
 
 It's how one instant is read three ways at once. When can a distributed
 team all take a call?

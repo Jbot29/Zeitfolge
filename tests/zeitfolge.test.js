@@ -855,6 +855,33 @@ test("in <zone>: desugar drops presentation — the lens truly dissolves", () =>
                    a.queries[0].members.map((m) => [m.start, m.end]));   // identical instants
 });
 
+test("in <zone>, <zone>…: one instant, several lenses, ONE query — the world clock (v0.20)", () => {
+  const q = run("now in Europe/Vienna, America/New_York, Asia/Tokyo").queries;
+  assert.equal(q.length, 1);                                              // one card, not three
+  assert.deepEqual(q[0].zones, ["Europe/Vienna", "America/New_York", "Asia/Tokyo"]);
+  assert.equal(q[0].zone, "Europe/Vienna");                               // first zone stays `zone` for anything single-minded
+  assert.equal(q[0].ms, NOW);
+  // a bound meeting works the same, and keeps its label
+  const m = run("standup = 2026-07-23 7:00\nstandup in Europe/Vienna, Asia/Tokyo").queries[0];
+  assert.equal(m.zones.length, 2); assert.equal(m.label, "standup");
+  // `show` too — the callable hour on one card
+  const s = run("w = 2026-09-15 12:00 .. 2026-09-15 13:00\nshow w in America/Los_Angeles, Europe/London").queries[0];
+  assert.deepEqual(s.zones, ["America/Los_Angeles", "Europe/London"]);
+  // no list → a one-element zones, so renderers never special-case its absence
+  assert.deepEqual(run("now").queries[0].zones, ["UTC"]);
+  assert.deepEqual(run("now in Asia/Tokyo").queries[0].zones, ["Asia/Tokyo"]);
+});
+
+test("a zone list is all-or-nothing: one bad zone and the tail is not a zone list", () => {
+  const errs = errorsOf("now in Asia/Tokyo, Nowhere/Noplace");
+  assert.equal(errs.length, 1);                                           // it fell into the expression and failed there
+  // and the world clock desugars to ONE literal whose note names every lens
+  const d = Z.desugar(run("now in Europe/Vienna, America/New_York, Asia/Tokyo"));
+  const lits = d.split("\n").filter((l) => /^\d{4}-/.test(l));
+  assert.equal(lits.length, 1);
+  assert.match(lits[0], /Europe\/Vienna, America\/New_York, Asia\/Tokyo/);
+});
+
 /* --------------------------------------------- as of (v0.14) */
 
 test("as of <instant>: reads a now-relative line at a hypothetical present", () => {
