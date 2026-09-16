@@ -134,6 +134,28 @@
     background:rgba(61,79,158,0.08); }
   .calgrid .d.on { background:var(--indigo); color:var(--paper); border-color:var(--indigo); }
   .calgrid .d.on.mark { border-color:var(--copper); border-width:2px; color:var(--paper); }  /* today, and a marked day */
+
+  /* ---- phones: stack the panes and let the page scroll. The desktop layout
+          is a fixed-height two-column grid with body overflow hidden — on a
+          narrow screen that means squashed panes and no way to scroll. ---- */
+  @media (max-width: 760px) {
+    html, body { height:auto; min-height:100%; }
+    body { overflow:auto; padding:10px 12px 28px; gap:8px; }
+    header { flex-wrap:wrap; }
+    .workspace { display:flex; flex-direction:column; gap:10px; min-height:auto; }
+    .col { min-height:auto; }
+    #editor { flex:none; height:42vh; min-height:220px; font-size:16px; line-height:1.5; }   /* 16px: iOS won't zoom on focus */
+    #datain { height:64px; font-size:14px; }
+    #cards { overflow:visible; }
+    .controls { gap:6px; }
+    button, select { padding:8px 12px; font-size:13px; }                                    /* thumb-sized */
+    #status { flex-basis:100%; margin-left:0; text-align:left; }
+    .big .n { font-size:28px; }
+    .clocks { grid-template-columns:auto auto auto minmax(60px,1fr); gap:5px 8px; }
+    .clockrow .coff { display:none; }                                                      /* the offset yields to the day-bar */
+    dialog.spec { max-width:96vw; max-height:92vh; }
+    table.cheat td:first-child { white-space:normal; }
+  }
 </style>
 </head>
 <body>
