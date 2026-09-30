@@ -132,7 +132,7 @@
 })(typeof self !== "undefined" ? self : this, function () {
 "use strict";
 
-const VERSION = "0.20";
+const VERSION = "0.21";
 const MS = { second: 1000, minute: 60000, hour: 3600000, day: 86400000 };
 
 /* ---------------------------------------------------------------------
@@ -834,9 +834,10 @@ function evaluate(src, opts) {
       if (!b) return null;
       if (a.t !== "inst" || b.t !== "inst") return fail(`".." wants an instant on each side`);
       let end = b.ms;
-      if (b.litTok && !b.litTok.hasTime) {          // bare end date: THROUGH that day
-        end = endOfDay(b.litTok.f);
-        b.litTok.ms = end;                          // the desugarer shows the resolved end
+      if (b.dateOnly) {                             // a DATE as the end — literal or bound — means THROUGH that day
+        const f = b.litTok ? b.litTok.f : dayOnly(epochToCivil(b.ms, zone));
+        end = endOfDay(f);
+        if (b.litTok) b.litTok.ms = end;            // the desugarer shows the resolved end
       }
       if (end <= a.ms) return fail(`an interval must end after it starts`);
       return { t: "set", members: [{ start: a.ms, end, labels: [] }] };
@@ -1210,16 +1211,35 @@ function evaluate(src, opts) {
       let q = null;
       if (body === "") {
         // bare: the current month, today marked
-        q = { kind: "calendar", ms: now, members: [], zone: dz, lensZone: zone, line: ln, label: "now" };
+        q = { kind: "calendar", ms: now, today: now, members: [], marks: [], zone: dz, lensZone: zone, line: ln, label: "now" };
       } else {
-        const v = parseExpr(body, ln);
-        if (!v) continue;
-        if (v.t === "inst")        // an instant: that month, that day marked
-          q = { kind: "calendar", ms: v.ms, members: [], zone: dz, lensZone: zone, line: ln, label: body, toks: v.toks };
-        else if (v.t === "set")    // a stretch: every month it spans, its days shaded, today still marked
-          q = { kind: "calendar", ms: now, members: v.members, zone: dz, lensZone: zone, line: ln, label: body, toks: v.toks };
-        else if (v.t === "dur") { err(ln, `"${clip(body)}" is a duration — calendar wants a moment or a stretch; anchor it to an instant first`); continue; }
-        else { err(ln, `"${clip(body)}" is a recurrence — bound it first (e.g. next 6 of ${clip(body)}), then calendar it`); continue; }
+        // EVENTS: a comma list where every item is an instant — each day gets
+        // marked and labeled with its name (graphiac, tattoo, schauplatz). `,`
+        // means collect-intervals everywhere else, so this is tried first and
+        // only wins if every piece is an instant; otherwise the whole body is
+        // one expression (a set to shade, or a single instant).
+        const pieces = body.split(/\s*,\s*/).filter(Boolean);
+        let marks = null;
+        if (pieces.length > 1) {
+          const saved = errors.length;
+          const vs = pieces.map((p) => parseExpr(p, ln));
+          if (vs.every((x) => x && x.t === "inst")) marks = vs.map((x, i) => ({ ms: x.ms, label: pieces[i], toks: x.toks }));
+          else errors.length = saved;                  // not an event list — drop the trial errors and parse it whole
+        }
+        if (marks) {
+          q = { kind: "calendar", ms: marks[0].ms, today: now, members: [], marks, zone: dz, lensZone: zone, line: ln, label: body,
+                toks: marks.flatMap((k) => k.toks || []) };
+        } else {
+          const v = parseExpr(body, ln);
+          if (!v) continue;
+          if (v.t === "inst")        // an instant: that month, that day marked and named
+            q = { kind: "calendar", ms: v.ms, today: now, members: [], marks: [{ ms: v.ms, label: body, toks: v.toks }],
+                  zone: dz, lensZone: zone, line: ln, label: body, toks: v.toks };
+          else if (v.t === "set")    // a stretch: every month it spans, its days shaded, today still marked
+            q = { kind: "calendar", ms: now, today: now, members: v.members, marks: [], zone: dz, lensZone: zone, line: ln, label: body, toks: v.toks };
+          else if (v.t === "dur") { err(ln, `"${clip(body)}" is a duration — calendar wants a moment or a stretch; anchor it to an instant first`); continue; }
+          else { err(ln, `"${clip(body)}" is a recurrence — bound it first (e.g. next 6 of ${clip(body)}), then calendar it`); continue; }
+        }
       }
       queries.push(q); statements.push(q);
 
@@ -1425,10 +1445,15 @@ function desugar(program) {
     }
     // a calendar is a display of a month (or a span of months) — freeze its
     // instant, or its set, like a clock does
-    else if (st.kind === "calendar")
-      out.push(st.members && st.members.length
-        ? `calendar ${rebuildToks(st.toks)}${st.zone !== "UTC" ? `   # spanned in ${st.zone}` : ""}`
-        : `calendar ${formatCivil(epochToCivil(st.ms, "UTC"))}${st.zone !== "UTC" ? `   # was read in ${st.zone}` : ""}`);
+    else if (st.kind === "calendar") {
+      const zn = st.zone !== "UTC" ? `   # was read in ${st.zone}` : "";
+      if (st.members && st.members.length)
+        out.push(`calendar ${rebuildToks(st.toks)}${st.zone !== "UTC" ? `   # spanned in ${st.zone}` : ""}`);
+      else if (st.marks && st.marks.length > 1)   // events: every mark frozen, names kept in the note
+        out.push(`calendar ${st.marks.map((k) => formatCivil(epochToCivil(k.ms, "UTC"))).join(", ")}   # was: ${st.marks.map((k) => k.label).join(", ")}${st.zone !== "UTC" ? ` (${st.zone})` : ""}`);
+      else
+        out.push(`calendar ${formatCivil(epochToCivil(st.ms, "UTC"))}${zn}`);
+    }
   }
   return out.join("\n");
 }

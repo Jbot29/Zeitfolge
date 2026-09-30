@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Zeitfolge — time you can read (v0.20)</title>
+<title>Zeitfolge — time you can read (v0.21)</title>
 <style>
   /* Same family as Schauplatz/Klangbild: paper, ink, mono. Zeitfolge's
      accents: indigo (now / the timeline) and copper (the target).
@@ -134,6 +134,10 @@
     background:rgba(61,79,158,0.08); }
   .calgrid .d.on { background:var(--indigo); color:var(--paper); border-color:var(--indigo); }
   .calgrid .d.on.mark { border-color:var(--copper); border-width:2px; color:var(--paper); }  /* today, and a marked day */
+  /* the events under a month: "6 graphiac · 14 tattoo · 20 schauplatz" */
+  .callegend { display:flex; flex-wrap:wrap; gap:2px 12px; margin-top:6px; width:210px;
+    font-family:var(--serif); font-style:italic; font-size:12px; color:var(--ink-soft); }
+  .callegend b { font-family:var(--mono); font-style:normal; font-weight:600; color:var(--indigo); }
 
   /* ---- phones: stack the panes and let the page scroll. The desktop layout
           is a fixed-height two-column grid with body overflow hidden — on a
@@ -198,7 +202,7 @@
       <table class="cheat">
         <tr><td>now &nbsp; · &nbsp; flight &nbsp; · &nbsp; now in Asia/Tokyo</td><td>a bare instant is a clock. <code>in &lt;zone&gt;</code> shows it in another zone.</td></tr>
         <tr><td>now in Europe/Vienna, Asia/Tokyo, America/New_York</td><td>a list of zones — one instant, one card, a row per lens: the world clock. Works on a meeting, and on <code>show</code>.</td></tr>
-        <tr><td>calendar &nbsp; · &nbsp; calendar trips</td><td>this month — or every month a stretch spans, its days shaded.</td></tr>
+        <tr><td>calendar &nbsp; · &nbsp; calendar trips &nbsp; · &nbsp; calendar a, b, c</td><td>this month — or every month a stretch spans, its days shaded — or a list of events, each day marked and named.</td></tr>
         <tr><td>until flight &nbsp; · &nbsp; since 2026-01-01</td><td>countdown / count-up, live.</td></tr>
         <tr><td>show trips in Europe/London</td><td>the stretches, big — one per option.</td></tr>
         <tr><td>days of trips &nbsp; · &nbsp; length of trips</td><td>civil days touched · absolute duration. They disagree across DST, on purpose.</td></tr>
@@ -401,6 +405,13 @@ trips = 2026-07-03 .. 2026-07-08,
 calendar                         # this month, today marked
 calendar trips                   # every month my trips touch, days shaded
 calendar last 180 days           # the whole Schengen window, one card
+
+# EVENTS: a list of instants — each day marked and named. A little
+# calendar for the month, no calendar app.
+graphiac   = 2026-10-06
+tattoo     = 2026-10-14
+schauplatz = 2026-10-20
+calendar graphiac, tattoo, schauplatz
 `,
   "world clock": `# The remote worker's wall: what time is it, right now, for everyone?
 # \`now\` is a clock; \`in\` takes a LIST of zones — one instant read through
@@ -1093,22 +1104,29 @@ function updateAssert(c, q) {
 // runaway span can't paint thousands of months.
 const CAL_MONTHS_CAP = 36;
 function updateCalendar(c, q) {
-  const markF = Z.epochToCivil(q.ms, q.zone);
-  const members = q.members || [];
+  const members = q.members || [], marks = q.marks || [];
+  const p2 = (n) => String(n).padStart(2, "0");
+  const key = (f) => `${f.y}-${p2(f.mo)}-${p2(f.d)}`;
+  // today is boxed; events (marks) are filled and named; a stretch is shaded
+  const todayF = Z.epochToCivil(q.today != null ? q.today : q.ms, q.zone);
+  const markMap = new Map();   // "y-m-d" → [labels]
+  for (const k of marks) { const f = Z.epochToCivil(k.ms, q.zone); const d = key(f); markMap.set(d, (markMap.get(d) || []).concat(k.label)); }
   c.querySelector("b").textContent = q.label || "now";
 
-  // which months to render
+  // which months to render: the stretch's span, else the events' span, else this one month
   let months = [];
-  if (members.length) {
-    const s = Z.epochToCivil(members[0].start, q.zone);
-    const e = Z.epochToCivil(members[members.length - 1].end - 1, q.zone);
+  const spanMonths = (fromMs, toMs) => {
+    const s = Z.epochToCivil(fromMs, q.zone), e = Z.epochToCivil(toMs, q.zone);
     let y = s.y, mo = s.mo;
     while (months.length < CAL_MONTHS_CAP) {
       months.push({ y, mo });
       if (y === e.y && mo === e.mo) break;
       if (++mo > 12) { mo = 1; y++; }
     }
-  } else months = [{ y: markF.y, mo: markF.mo }];
+  };
+  if (members.length) spanMonths(members[0].start, members[members.length - 1].end - 1);
+  else if (marks.length) { const ms = marks.map((k) => k.ms); spanMonths(Math.min(...ms), Math.max(...ms)); }
+  else { const f = Z.epochToCivil(q.ms, q.zone); months = [{ y: f.y, mo: f.mo }]; }
 
   // is this civil day touched by any member? (compare against the day's real
   // wall bounds in the lens, so DST-length days are handled)
@@ -1126,13 +1144,18 @@ function updateCalendar(c, q) {
     const firstDow = (new Date(Date.UTC(y, mo - 1, 1)).getUTCDay() + 6) % 7;   // Monday = 0
     const cells = ["Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"].map((h) => `<div class="hd">${h}</div>`);
     for (let i = 0; i < firstDow; i++) cells.push(`<div class="d"></div>`);
+    const legend = [];
     for (let d = 1; d <= daysInMonth; d++) {
       const dow = (firstDow + d - 1) % 7;
-      const isMark = y === markF.y && mo === markF.mo && d === markF.d;
-      const cls = "d" + (shaded(y, mo, d) ? " on" : "") + (isMark ? " mark" : "") + (dow >= 5 ? " wknd" : "");
-      cells.push(`<div class="${cls}">${d}</div>`);
+      const k = `${y}-${p2(mo)}-${p2(d)}`;
+      const isToday = y === todayF.y && mo === todayF.mo && d === todayF.d;
+      const names = markMap.get(k);
+      if (names) legend.push(`<span><b>${d}</b> ${names.join(", ")}</span>`);
+      const cls = "d" + (shaded(y, mo, d) || names ? " on" : "") + (isToday ? " mark" : "") + (dow >= 5 ? " wknd" : "");
+      cells.push(`<div class="${cls}"${names ? ` title="${names.join(", ")}"` : ""}>${d}</div>`);
     }
-    return `<div class="calmon"><div class="calhead">${monthName(y, mo)} ${y}</div><div class="calgrid">${cells.join("")}</div></div>`;
+    return `<div class="calmon"><div class="calhead">${monthName(y, mo)} ${y}</div><div class="calgrid">${cells.join("")}</div>` +
+           (legend.length ? `<div class="callegend">${legend.join("")}</div>` : "") + `</div>`;
   };
 
   let html = months.map(block).join("");

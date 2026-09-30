@@ -964,6 +964,41 @@ test("calendar of a stretch desugars to its frozen set, not an instant", () => {
   assert.equal(run(Z.desugar(a)).queries[0].members.length, 1);
 });
 
+test("calendar of an event list: each instant marked and named on one card (v0.21)", () => {
+  const hdr = "timezone = Europe/Vienna\ngraphiac = 2026-10-06\nschauplatz = 2026-10-20\ntattoo = 2026-10-14\n";
+  const q = run(hdr + "calendar graphiac, tattoo, schauplatz").queries[0];
+  assert.equal(q.kind, "calendar");
+  assert.deepEqual(q.marks.map((k) => k.label), ["graphiac", "tattoo", "schauplatz"]);   // written order, names kept
+  assert.deepEqual(q.marks.map((k) => Z.epochToCivil(k.ms, "Europe/Vienna").d), [6, 14, 20]);
+  assert.equal(q.members.length, 0);
+  assert.equal(q.today, NOW);                                   // today is still known, for the box
+  // a single instant is now a one-event list, so it gets its name too
+  assert.deepEqual(run(hdr + "calendar graphiac").queries[0].marks.map((k) => k.label), ["graphiac"]);
+  // a set is still a set (shaded, no marks); bare is still bare
+  assert.equal(run("t = 2026-10-01 .. 2026-10-05\ncalendar t").queries[0].marks.length, 0);
+  assert.equal(run("calendar").queries[0].marks.length, 0);
+  // a list that isn't all instants is not an event list — it errors as the expression it is
+  assert.match(errorsOf(hdr + "calendar graphiac, 3 days")[0], /works on intervals/);
+});
+
+test("calendar events desugar to frozen instants and round-trip", () => {
+  const hdr = "timezone = Europe/Vienna\ngraphiac = 2026-10-06\ntattoo = 2026-10-14\n";
+  const a = run(hdr + "calendar graphiac, tattoo");
+  const line = Z.desugar(a).split("\n").find((l) => l.startsWith("calendar"));
+  assert.match(line, /^calendar 2026-10-05 22:00, 2026-10-13 22:00/);   // midnight Vienna = 22:00 UTC the day before
+  assert.match(line, /was: graphiac, tattoo/);
+  const b = run(Z.desugar(a));
+  assert.deepEqual(b.queries[0].marks.map((k) => k.ms), a.queries[0].marks.map((k) => k.ms));
+});
+
+test("the through-rule applies to a BOUND date too, not just a literal", () => {
+  const hdr = "timezone = Europe/Vienna\ngraphiac = 2026-10-06\n";
+  const s = run(hdr + "x = graphiac .. graphiac\ndays of x").queries[0];   // used to fail: "must end after it starts"
+  assert.equal(s.days, 1);
+  // …but a date-TIME end is still exact
+  assert.match(errorsOf("t = 2026-10-06 10:00\nx = t .. t")[0], /must end after it starts/);
+});
+
 test("calendar is a reserved word", () => {
   assert.match(errorsOf("calendar = 2026-01-01")[0], /reserved word/);
 });

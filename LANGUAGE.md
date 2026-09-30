@@ -1,4 +1,4 @@
-# Zeitfolge — language spec v0.20
+# Zeitfolge — language spec v0.21
 
 A small, code-first language for working with time — asking questions about
 it, and doing algebra on stretches of it. The same source is the data, the
@@ -73,7 +73,9 @@ shipping estimate ever written — "due in 8 business hours", "ships in 3
 business days" — `business =` declares the working calendar the way
 `timezone =` declares the lens; v0.20 by four world-clock cards eating the
 screen — `in` takes a list of zones, so one instant reads through every
-lens on one card.
+lens on one card; v0.21 by three October events — `calendar a, b, c` marks
+and names each day (and, found on the way, the through-rule now honours a
+bound date, not just a literal one).
 
 ## Try it live
 
@@ -102,7 +104,8 @@ timezone = <IANA zone>        aim the lens (default: UTC)
                               define a recurrence (its own statement form)
 <instant>                     a bare instant on a line — read it as a clock
 now                           the clock whose instant is the present
-calendar [<instant>|<set>]    month card(s) — a month, or every month a set spans
+calendar [<instant>|<set>|<instant>, <instant>…]
+                              month card(s) — a month, every month a set spans, or events marked and named
 until <instant>               how long from now until it?
 since <instant>               how long from it until now?
 days of <intervals>           civil days touched, through the lens
@@ -194,6 +197,21 @@ up across it:
 calendar trips             # every month a trip touches, trip days shaded
 calendar last 180 days     # the whole rolling window, one card
 ```
+
+Given a **list of instants**, it's an event calendar: each day is filled
+and **named** under the month, today still boxed. Three dates and a line
+replace the calendar app for "what's on in October?":
+
+```
+graphiac   = 2026-10-06
+tattoo     = 2026-10-14
+schauplatz = 2026-10-20
+calendar graphiac, tattoo, schauplatz     # → 6 graphiac · 14 tattoo · 20 schauplatz
+```
+
+(The list form is tried first and wins only if *every* item is an instant;
+otherwise the body is one expression — a stretch to shade. A single
+instant is a one-event list, so `calendar graphiac` names its day too.)
 
 Like the clock it's a pure display, so it composes with the lens, with `in
 <zone>` (`calendar in Asia/Tokyo`), and with `as of` (`calendar as of
@@ -354,12 +372,18 @@ sit the selectors `first <n> of` and `next <n> of` (see Recurrence).
 
 ### `..` and the through-rule
 
-A bare date (no time) on the **right** of `..` means *through that day*:
+A date (no time) on the **right** of `..` means *through that day* — whether
+it's written as a literal or is a **bound name** that holds a date:
 
 ```
 trip = 2026-03-27 .. 2026-05-11                    # includes May 11 — 46 days, as a human states a trip
 slot = 2026-05-11 10:00 .. 2026-05-11 12:00        # with explicit times: exactly 2 hours
+day  = graphiac .. graphiac                        # a bound date: that whole day, 1 day
 ```
+
+A date carries a *date-only* bit that survives binding and whole-day
+arithmetic, and that bit is what triggers the rule — so a date-**time** on
+the right is always exact.
 
 `2026-01-01 .. 2026-01-03` is three days; `2026-01-01 .. 2026-01-03 00:00`
 is exactly two. `2026-01-01 .. 2026-01-01` is a valid one-day trip. On the
