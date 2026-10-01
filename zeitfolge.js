@@ -28,7 +28,8 @@
  * v0.1 — instants and the two countdown verbs:
  *   timezone = <IANA zone>      the lens (defaults to UTC)
  *   <name> = <civil literal>    bind an instant (stored as UTC epoch ms)
- *   until / since <instant>     how long to / from it?
+ *   until / since <instant>[, <instant>…]
+ *                              how long to / from it? — a list is one card, a row each
  * v0.2 — INTERVALS: stretches of the timeline as first-class values.
  *   Forced by the credit-blocks problem: overlapping purchased blocks
  *   with different expiries, hand-decomposed into non-overlapping
@@ -132,7 +133,7 @@
 })(typeof self !== "undefined" ? self : this, function () {
 "use strict";
 
-const VERSION = "0.21";
+const VERSION = "0.22";
 const MS = { second: 1000, minute: 60000, hour: 3600000, day: 86400000 };
 
 /* ---------------------------------------------------------------------
@@ -1091,11 +1092,26 @@ function evaluate(src, opts) {
 
     // until / since — the countdown verbs
     } else if ((m = text.match(/^(until|since)\b\s*(.*)$/))) {
-      const kind = m[1], target = resolveInstant(m[2].trim(), ln);
-      if (!target) continue;
-      const diff = kind === "until" ? target.ms - now : now - target.ms;
-      const q = { kind, label: target.label, targetMs: target.ms, zone, line: ln,
-                  diffMs: diff, passed: diff < 0, breakdown: breakdown(diff), toks: target.toks };
+      const kind = m[1], body = m[2].trim();
+      // A LIST of instants — `until tattoo, solo, flight` — is several
+      // countdowns on one card, one row each: the world clock's sibling
+      // (there, one instant through many lenses; here, many instants through
+      // one). `,` means collect-intervals everywhere else, and a collection
+      // is never an instant — so here a comma can only mean a list, and each
+      // piece is resolved on its own; the first that isn't an instant says why.
+      const pieces = body.split(/\s*,\s*/).filter(Boolean);
+      const targets = pieces.length > 1 ? pieces.map((p) => resolveInstant(p, ln)) : [resolveInstant(body, ln)];
+      if (!targets.every(Boolean)) continue;
+      const measured = targets.map((t) => {
+        const diff = kind === "until" ? t.ms - now : now - t.ms;
+        return { label: t.label, ms: t.ms, diffMs: diff, passed: diff < 0, breakdown: breakdown(diff), toks: t.toks };
+      });
+      // the first target also fills the single-countdown fields, so one
+      // countdown and a wall of them are the same shape to a reader
+      const first = measured[0];
+      const q = { kind, label: measured.length > 1 ? body : first.label, targetMs: first.ms, zone, line: ln,
+                  diffMs: first.diffMs, passed: first.passed, breakdown: first.breakdown,
+                  toks: measured.flatMap((t) => t.toks || []), targets: measured };
       queries.push(q); statements.push(q);
 
     // rolling days of X in N days [limit M] — the windowed aggregation:
@@ -1397,6 +1413,9 @@ function desugar(program) {
     else if (st.kind === "bind" && st.valueType === "instant")
       out.push(`${st.name} = ${formatCivil(epochToCivil(st.ms, "UTC"))}${st.zone !== "UTC" ? `   # was written in ${st.zone}` : ""}`);
     else if (st.kind === "bind") out.push(`${st.name} = ${rebuildToks(st.toks)}${note}`);
+    else if ((st.kind === "until" || st.kind === "since") && st.targets && st.targets.length > 1)
+      // a wall of countdowns: every target frozen, names kept in the note
+      out.push(`${st.kind} ${st.targets.map((t) => formatCivil(epochToCivil(t.ms, "UTC"))).join(", ")}   # was: ${st.targets.map((t) => t.label).join(", ")}${st.zone !== "UTC" ? ` (${st.zone})` : ""}`);
     else if (st.kind === "until" || st.kind === "since")
       out.push(`${st.kind} ${formatCivil(epochToCivil(st.targetMs, "UTC"))}${/^[A-Za-z_]/.test(st.label) ? `   # was: ${st.label}` : note}`);
     else if (st.kind === "days")

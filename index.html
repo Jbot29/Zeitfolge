@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Zeitfolge — time you can read (v0.21)</title>
+<title>Zeitfolge — time you can read (v0.22)</title>
 <style>
   /* Same family as Schauplatz/Klangbild: paper, ink, mono. Zeitfolge's
      accents: indigo (now / the timeline) and copper (the target).
@@ -109,6 +109,17 @@
   .clockrow .ctime { font-size:20px; font-weight:500; font-variant-numeric:tabular-nums; letter-spacing:-0.01em; }
   .clockrow .coff { font-size:10px; letter-spacing:0.1em; color:var(--ink-soft); white-space:nowrap; }
   .clockrow canvas.cbar { width:100%; display:block; }
+  /* a wall of countdowns — many instants, one lens, one row each */
+  .counts { display:grid; grid-template-columns:auto auto auto auto; gap:6px 14px;
+    align-items:baseline; margin:8px 0 2px; }
+  .countrow { display:contents; }
+  .countrow .name { font-weight:600; color:var(--indigo); font-size:13px; white-space:nowrap; }
+  .countrow .cdate { font-size:11px; color:var(--ink-soft); white-space:nowrap; }
+  .countrow .cdays { font-size:20px; font-weight:500; font-variant-numeric:tabular-nums; letter-spacing:-0.01em;
+    white-space:nowrap; text-align:right; }
+  .countrow .cdays .u { font-size:10px; letter-spacing:0.14em; text-transform:uppercase; color:var(--ink-soft); margin-left:4px; }
+  .countrow .ctime { font-size:14px; font-variant-numeric:tabular-nums; color:var(--ink-soft); white-space:nowrap; }
+  .countrow.passed .cdays, .countrow.passed .name { color:var(--copper); }
   .big .n.wide { font-size:22px; }
   .big .cov { color:var(--indigo); text-transform:none; letter-spacing:0.04em; }
   canvas { width:100%; display:block; }
@@ -161,6 +172,8 @@
     .big .n { font-size:28px; }
     .clocks { grid-template-columns:auto auto auto minmax(60px,1fr); gap:5px 8px; }
     .clockrow .coff { display:none; }                                                      /* the offset yields to the day-bar */
+    .counts { grid-template-columns:auto auto auto; gap:6px 8px; }
+    .countrow .cdate { display:none; }                                                     /* the date yields to the countdown */
     dialog.spec { max-width:96vw; max-height:92vh; }
     table.cheat td:first-child { white-space:normal; }
   }
@@ -208,6 +221,7 @@
         <tr><td>now in Europe/Vienna, Asia/Tokyo, America/New_York</td><td>a list of zones — one instant, one card, a row per lens: the world clock. Works on a meeting, and on <code>show</code>.</td></tr>
         <tr><td>calendar &nbsp; · &nbsp; calendar trips &nbsp; · &nbsp; calendar a, b, c</td><td>this month — or every month a stretch spans, its days shaded — or a list of events, each day marked and named.</td></tr>
         <tr><td>until flight &nbsp; · &nbsp; since 2026-01-01</td><td>countdown / count-up, live.</td></tr>
+        <tr><td>until tattoo, solo, flight</td><td>a list of instants — one card, a row per countdown: the wall. <code>since</code> takes one too.</td></tr>
         <tr><td>show trips in Europe/London</td><td>the stretches, big — one per option.</td></tr>
         <tr><td>days of trips &nbsp; · &nbsp; length of trips</td><td>civil days touched · absolute duration. They disagree across DST, on purpose.</td></tr>
         <tr><td>partition a, b</td><td>cut at every boundary — who covers each piece?</td></tr>
@@ -379,6 +393,23 @@ until go_to_airport
 
 in_amsterdam = flight + 3 hours + 30 minutes + 30 minutes
 until in_amsterdam
+`,
+  "countdown wall": `# What's coming up? Three countdowns used to be three cards. \`until\`
+# takes a LIST of instants — one card, one row each, all ticking, and a
+# shared strip underneath with a flag per target, so you see the spacing
+# too. The world clock's sibling: there one instant through many lenses,
+# here many instants through one. Written order is kept.
+
+timezone = Europe/Vienna
+
+tattoo = 2026-10-14 10:00
+solo = 2026-10-23 19:30
+flight_to_vietnam = 2026-11-02 11:45
+
+until tattoo, solo, flight_to_vietnam
+
+# the same list zoomed out — each day marked and named
+calendar tattoo, solo, flight_to_vietnam
 `,
   "timezone helper": `# One meeting, three wall clocks — the remote worker's daily question.
 # The lens is presentation: re-aim it and ask again. Each answer shows
@@ -698,6 +729,7 @@ const EXAMPLE_SLUGS = {
   "booking-load": "booking via load",
   "credits": "credit blocks",
   "flight": "flight countdown",
+  "countdown-wall": "countdown wall",
   "timezone-helper": "timezone helper",
   "planner": "planner's desk",
   "world-clock": "world clock",
@@ -782,7 +814,7 @@ function render(rebuild) {
     status.classList.toggle("err", !!w);
   }
 
-  const sig = out.queries.map((q) => q.kind + (q.members ? q.members.length : "")).join("|");
+  const sig = out.queries.map((q) => q.kind + (q.members ? q.members.length : "") + (q.targets ? `/${q.targets.length}` : "")).join("|");
   if (rebuild || sig !== cardSig) {
     cardSig = sig;
     cards.innerHTML = "";
@@ -802,7 +834,10 @@ function render(rebuild) {
 function buildCard(q) {
   const c = document.createElement("div");
   c.className = "card";
-  if (q.kind === "until" || q.kind === "since") {
+  if ((q.kind === "until" || q.kind === "since") && q.targets && q.targets.length > 1) {
+    c.innerHTML = `<div class="cap"><span><b></b></span><span class="tz"></span></div>
+      <div class="counts"></div><canvas height="56"></canvas>`;   // a wall of countdowns: one row per target, one shared strip
+  } else if (q.kind === "until" || q.kind === "since") {
     c.innerHTML = `<div class="cap"><span><b></b></span><span class="tz"></span></div>
       <div class="when"></div><div class="big"></div><div class="verdict"></div><canvas height="56"></canvas>`;
   } else if (q.kind === "now" && q.zones && q.zones.length > 1) {
@@ -845,7 +880,8 @@ function updateCard(c, q, now) {
   let tz = q.zone;
   if (q.asOf != null) { const f = Z.epochToCivil(q.asOf, q.zone); tz += `  ·  as of ${f.y}-${p2(f.mo)}-${p2(f.d)}`; }
   c.querySelector(".tz").textContent = tz;
-  if (q.kind === "until" || q.kind === "since") updateCountdown(c, q, now);
+  if ((q.kind === "until" || q.kind === "since") && q.targets && q.targets.length > 1) updateCountdowns(c, q, now);
+  else if (q.kind === "until" || q.kind === "since") updateCountdown(c, q, now);
   else if (q.kind === "now" && q.zones && q.zones.length > 1) updateClocks(c, q);
   else if (q.kind === "now") q.dateOnly ? updateDate(c, q) : updateNow(c, q, now);
   else if (q.kind === "calendar") updateCalendar(c, q);
@@ -1044,6 +1080,27 @@ function updateCountdown(c, q, now) {
   c.querySelector(".verdict").textContent = q.passed
     ? (q.kind === "until" ? `passed ${Z.formatDuration(bd)} ago` : `hasn't happened yet — ${Z.formatDuration(bd)} from now`)
     : "";
+  drawCountdown(c.querySelector("canvas"), q, now);
+}
+
+// a wall of countdowns — several instants measured from the same now, one
+// row each: name · weekday date · days · hh:mm:ss. A passed target turns
+// copper and says so. Beneath, one strip spans now and every target, a
+// flag per target, so the spacing between them reads at a glance.
+function updateCountdowns(c, q, now) {
+  const p2 = (n) => String(n).padStart(2, "0");
+  c.querySelector("b").textContent = `${q.kind} ${q.label}`;
+  const rows = q.targets.map((t) => {
+    const f = Z.epochToCivil(t.ms, q.zone), bd = t.breakdown;
+    const wd = new Intl.DateTimeFormat("en-US", { timeZone: q.zone, weekday: "short" }).format(t.ms);
+    const clock = `${p2(bd.hours)}:${p2(bd.minutes)}:${p2(bd.seconds)}`;
+    const time = t.passed ? (q.kind === "until" ? `passed ${Z.formatDuration(bd)} ago` : `${Z.formatDuration(bd)} from now`) : clock;
+    return `<div class="countrow${t.passed ? " passed" : ""}"><span class="name">${t.label}</span>` +
+           `<span class="cdate">${wd} ${f.y}-${p2(f.mo)}-${p2(f.d)} ${p2(f.h)}:${p2(f.mi)}</span>` +
+           `<span class="cdays">${bd.days}<span class="u">${bd.days === 1 ? "day" : "days"}</span></span>` +
+           `<span class="ctime">${time}</span></div>`;
+  });
+  c.querySelector(".counts").innerHTML = rows.join("");
   drawCountdown(c.querySelector("canvas"), q, now);
 }
 
@@ -1268,14 +1325,38 @@ function axis(ctx, W, H, a, b, x, zone, unitLabel) {
   if (unitLabel) { ctx.textAlign = "center"; ctx.fillText(`ticks: 1 ${unitLabel}`, W / 2, H - 4); }
 }
 
-// countdown strip: the stretch between now and the target, calendar ticks
+// countdown strip: the stretch between now and the target(s), calendar
+// ticks. A wall of countdowns shares one strip — a flag per target, named.
+// Labels are laid out left to right; one that would collide with its
+// neighbour steps up a tier, with a hairline down to its flag, and the
+// strip grows to make room — so close events stay readable.
 function drawCountdown(canvas, q, now) {
-  const { ctx, W } = setupCanvas(canvas, 56);
-  const H = 56, mid = 30, pad = 10;
-  const a = Math.min(now, q.targetMs), b = Math.max(now, q.targetMs);
+  const pad = 10, TIER = 11, BASE = 56;
+  const targets = q.targets && q.targets.length > 1 ? q.targets : [{ ms: q.targetMs }];
+  const tms = targets.map((t) => t.ms);
+  const a = Math.min(now, ...tms), b = Math.max(now, ...tms);
   const span = Math.max(b - a, Z.MS.minute);
-  const x = (t) => pad + ((t - a) / span) * (W - 2 * pad);
+  const W0 = canvas.clientWidth || 600;
+  const x = (t) => pad + ((t - a) / span) * (W0 - 2 * pad);
   const [step, unit] = TICKS.find(([s]) => span / s <= 90) || TICKS[TICKS.length - 1];
+
+  // lay the labels out before sizing the canvas: a wall names its flags
+  const labels = [];
+  if (targets.length > 1) {
+    const mctx = canvas.getContext("2d"); mctx.font = "9px monospace";
+    const tiers = [];   // right edge of the last label placed on each tier
+    for (const t of targets.filter((t) => t.label).sort((p, r) => p.ms - r.ms)) {
+      const w = mctx.measureText(t.label).width;
+      const cx = Math.min(Math.max(x(t.ms), pad + w / 2), W0 - pad - w / 2);
+      const left = cx - w / 2 - 3, right = cx + w / 2 + 3;
+      let tier = tiers.findIndex((edge) => edge < left);
+      if (tier < 0) { tier = tiers.length; tiers.push(right); } else tiers[tier] = right;
+      labels.push({ t, cx, tier, w });
+    }
+  }
+  const extra = Math.max(0, ...labels.map((l) => l.tier)) * TIER;
+  const H = BASE + extra, mid = 30 + extra;
+  const { ctx, W } = setupCanvas(canvas, H);
 
   ctx.strokeStyle = "rgba(37,42,56,0.35)"; ctx.lineWidth = 1;
   ctx.beginPath(); ctx.moveTo(pad, mid); ctx.lineTo(W - pad, mid); ctx.stroke();
@@ -1285,17 +1366,29 @@ function drawCountdown(canvas, q, now) {
   }
   ctx.fillStyle = "#3d4f9e";   // now: an indigo dot
   ctx.beginPath(); ctx.arc(x(now), mid, 4.5, 0, 7); ctx.fill();
-  ctx.strokeStyle = "#b4551f"; ctx.lineWidth = 2;   // target: a copper flag
-  ctx.beginPath(); ctx.moveTo(x(q.targetMs), mid + 6); ctx.lineTo(x(q.targetMs), mid - 12); ctx.stroke();
-  ctx.fillStyle = "#b4551f";
-  ctx.beginPath(); ctx.moveTo(x(q.targetMs), mid - 12); ctx.lineTo(x(q.targetMs) + 9, mid - 8.5);
-  ctx.lineTo(x(q.targetMs), mid - 5); ctx.fill();
+  for (const t of targets) {   // each target: a copper flag
+    const tx = x(t.ms);
+    ctx.strokeStyle = "#b4551f"; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(tx, mid + 6); ctx.lineTo(tx, mid - 12); ctx.stroke();
+    ctx.fillStyle = "#b4551f";
+    ctx.beginPath(); ctx.moveTo(tx, mid - 12); ctx.lineTo(tx + 9, mid - 8.5); ctx.lineTo(tx, mid - 5); ctx.fill();
+  }
+  ctx.font = "9px monospace"; ctx.textAlign = "center";
+  for (const l of labels) {
+    const y = mid - 19 - l.tier * TIER;   // tier 0 sits just above the flag
+    if (l.tier > 0) {   // a raised label keeps a hairline down to its pole
+      ctx.strokeStyle = "rgba(180,85,31,0.45)"; ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(x(l.t.ms), mid - 12); ctx.lineTo(x(l.t.ms), y + 2); ctx.stroke();
+    }
+    ctx.fillStyle = "#b4551f";
+    ctx.fillText(l.t.label, l.cx, y);
+  }
 
   ctx.fillStyle = "rgba(37,42,56,0.55)"; ctx.font = "9px monospace";
   ctx.textAlign = "left";
-  ctx.fillText(now <= q.targetMs ? "now" : Z.formatCivil(Z.epochToCivil(a, q.zone)), pad, H - 4);
+  ctx.fillText(now === a ? "now" : Z.formatCivil(Z.epochToCivil(a, q.zone)), pad, H - 4);
   ctx.textAlign = "right";
-  ctx.fillText(now <= q.targetMs ? Z.formatCivil(Z.epochToCivil(b, q.zone)) : "now", W - pad, H - 4);
+  ctx.fillText(now === b ? "now" : Z.formatCivil(Z.epochToCivil(b, q.zone)), W - pad, H - 4);
   ctx.textAlign = "center"; ctx.fillText(`ticks: 1 ${unit}`, W / 2, H - 4);
 }
 

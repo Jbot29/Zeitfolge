@@ -51,6 +51,10 @@ timezone = Europe/Vienna
 flight = 2026-07-17 10:00
 until flight                  # → 4 days 19 hours 23 minutes — live, with a timeline strip
 
+tattoo = 2026-07-14 10:00
+solo = 2026-07-23 19:30
+until tattoo, solo, flight    # → one card, a row per countdown, a flag per target on the strip
+
 block1 = 2026-01-10 .. 2026-04-09      # a 90-day block of credits
 block2 = 2026-02-15 .. 2026-06-15      # bought mid-block, different expiry
 partition block1, block2               # → the non-overlapping pieces, drawn stacked:

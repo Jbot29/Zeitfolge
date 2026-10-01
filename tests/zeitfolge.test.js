@@ -176,6 +176,55 @@ test("a query carries the lens in force at its line", () => {
   assert.equal(out.queries[1].targetMs - out.queries[0].targetMs, 2 * Z.MS.hour);
 });
 
+test("until a, b, c: a list of instants is ONE query, a target per item, written order kept", () => {
+  const out = run([
+    "timezone = UTC",
+    "tattoo = 2026-07-14 10:00",
+    "solo = 2026-07-23 19:30",
+    "flight = 2026-08-02 11:45",
+    "until tattoo, solo, flight",
+  ].join("\n"));
+  assert.equal(out.queries.length, 1);
+  const q = out.queries[0];
+  assert.equal(q.kind, "until");
+  assert.equal(q.label, "tattoo, solo, flight");
+  assert.deepEqual(q.targets.map((t) => t.label), ["tattoo", "solo", "flight"]);
+  assert.deepEqual(q.targets.map((t) => t.diffMs), [
+    Date.UTC(2026, 6, 14, 10) - NOW, Date.UTC(2026, 6, 23, 19, 30) - NOW, Date.UTC(2026, 7, 2, 11, 45) - NOW]);
+  assert.equal(q.targets[0].breakdown.days, 1);
+  // the first target also fills the single-countdown fields
+  assert.equal(q.targetMs, q.targets[0].ms);
+  assert.equal(q.diffMs, q.targets[0].diffMs);
+});
+
+test("a single until still carries a one-item target list, so the two forms share a shape", () => {
+  const q = run("until 2026-07-13 12:00").queries[0];
+  assert.equal(q.targets.length, 1);
+  assert.equal(q.targets[0].diffMs, Z.MS.day);
+});
+
+test("since a, b: each item measured from its own side of now; a passed row is marked", () => {
+  const q = run("since 2026-07-10 12:00, 2026-07-13 12:00").queries[0];
+  assert.deepEqual(q.targets.map((t) => t.passed), [false, true]);   // the second is still ahead — "hasn't happened yet"
+  assert.equal(q.targets[0].breakdown.days, 2);
+});
+
+test("until a, b refuses an item that isn't an instant, with the single-form error", () => {
+  const pre = "trips = 2026-01-01 .. 2026-01-05\nf = 2026-07-17 10:00\n";
+  assert.match(errorsOf(pre + "until f, trips")[0], /is an interval/);
+  assert.match(errorsOf("until 2026-07-17, 3 hours")[0], /is a duration/);
+});
+
+test("a countdown wall desugars to its frozen literals, names kept, and round-trips", () => {
+  const src = "timezone = Europe/Vienna\na = 2026-07-14 10:00\nb = 2026-07-23 19:30\nuntil a, b";
+  const out = run(src);
+  const d = Z.desugar(out);
+  assert.match(d, /^until 2026-07-14 08:00, 2026-07-23 17:30 {3}# was: a, b \(Europe\/Vienna\)$/m);
+  const again = run(d);
+  const q = again.queries.find((x) => x.kind === "until");
+  assert.deepEqual(q.targets.map((t) => t.ms), out.queries[0].targets.map((t) => t.ms));
+});
+
 test("countdown across a spring-forward night is 23 absolute hours", () => {
   const nowCET = Date.UTC(2026, 2, 28, 11);   // 12:00 CET on 2026-03-28
   const out = Z.evaluate("timezone = Europe/Vienna\nuntil 2026-03-29 12:00", { now: nowCET });

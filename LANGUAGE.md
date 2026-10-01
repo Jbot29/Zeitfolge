@@ -1,4 +1,4 @@
-# Zeitfolge — language spec v0.21
+# Zeitfolge — language spec v0.22
 
 A small, code-first language for working with time — asking questions about
 it, and doing algebra on stretches of it. The same source is the data, the
@@ -75,7 +75,8 @@ business days" — `business =` declares the working calendar the way
 screen — `in` takes a list of zones, so one instant reads through every
 lens on one card; v0.21 by three October events — `calendar a, b, c` marks
 and names each day (and, found on the way, the through-rule now honours a
-bound date, not just a literal one).
+bound date, not just a literal one); v0.22 by the same three events as
+three countdown cards — `until a, b, c` is one card, a row each.
 
 ## Try it live
 
@@ -106,8 +107,8 @@ timezone = <IANA zone>        aim the lens (default: UTC)
 now                           the clock whose instant is the present
 calendar [<instant>|<set>|<instant>, <instant>…]
                               month card(s) — a month, every month a set spans, or events marked and named
-until <instant>               how long from now until it?
-since <instant>               how long from it until now?
+until <instant>[, <instant>…] how long from now until it? — a list is one card, a row each
+since <instant>[, <instant>…] how long from it until now?
 days of <intervals>           civil days touched, through the lens
 length of <intervals>         absolute duration of the coverage
 partition <intervals>         cut at every boundary — who covers each piece?
@@ -175,6 +176,29 @@ Only instants become clocks. A set has width (`show`, `days of`, `length
 of` are its verbs); a duration has no position (anchor it to an instant);
 a recurrence is unbounded (bound it) — each is refused with a pointer to
 the verb that fits.
+
+## A wall of countdowns — `until a, b, c`
+
+`until` and `since` take a **list of instants** too. Three countdowns used
+to be three cards; the list is one card, one row per target — name, its
+wall time, days, hh:mm:ss — all ticking, with one strip underneath that
+spans now and every target, a flag per target, so the spacing between
+them reads at a glance. It is the world clock's sibling: there, one
+instant through many lenses; here, many instants through one.
+
+```
+tattoo            = 2026-10-14 10:00
+solo              = 2026-10-23 19:30
+flight_to_vietnam = 2026-11-02 11:45
+until tattoo, solo, flight_to_vietnam     # one card, three rows
+```
+
+Written order is kept, so you arrange the wall. A target that has passed
+turns copper and says how long ago, as the single form does. Every item
+must be an instant — a comma can only mean a list here, because a
+collection is never an instant — and the first item that isn't says why.
+In the UTC view the wall freezes to its list of resolved literals, names
+kept in the note, exactly as an event calendar does.
 
 ## A month at a glance — `calendar`
 
